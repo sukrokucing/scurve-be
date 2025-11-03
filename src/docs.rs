@@ -84,7 +84,7 @@ fn ensure_paths(doc: &mut Value) {
 		return;
 	}
 
-	let mut paths_object = doc
+	let paths_object = doc
 		.as_object_mut()
 		.expect("OpenAPI root must be an object")
 		.entry("paths")
