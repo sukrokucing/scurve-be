@@ -26,6 +26,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 clap = { version = "4", features = ["derive"] }
 async-trait = "0.1"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 [profile.release]
 codegen-units = 1

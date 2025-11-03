@@ -135,7 +135,7 @@ Requests requiring auth expect an `Authorization: Bearer <token>` header. Regist
 When using the provided container (e.g., `rust-service`), supply explicit paths to keep build artifacts inside the workspace:
 
 ```bash
-docker exec -it rust-service cargo run \
+docker exec -it rust-service env RUST_BACKTRACE=1 CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem cargo run \
   --manifest-path scurve-be/Cargo.toml \
   --target-dir scurve-be/target \
   --release
@@ -197,7 +197,7 @@ Notes on how to use the UI effectively:
 
     ```bash
     docker exec -it rust-service \
-      env RUST_BACKTRACE=1 \
+      env RUST_BACKTRACE=1 CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
       cargo run --manifest-path scurve-be/Cargo.toml \
       --target-dir scurve-be/target --release
     ```
@@ -215,3 +215,63 @@ What to expect
   and allow you to call the endpoints using the provided examples.
 - Endpoints that require auth will show a lock icon; after Authorize they will
   send `Authorization: Bearer <token>` on Try-it-out requests.
+
+## HTTP/2 and HTTPS (TLS) support
+
+This service prefers TLS (HTTPS) for browser compatibility and will negotiate
+HTTP/2 automatically via ALPN when TLS is enabled. Browsers require TLS for
+HTTP/2, so the project uses `axum-server` + Rustls to provide a secure server
+that supports ALPN/HTTP2 negotiation.
+
+How to enable TLS
+
+- Provide PEM files via environment variables before starting the server:
+
+  CERT_PATH=/path/to/cert.pem
+  KEY_PATH=/path/to/key.pem
+
+  Then start normally (the server will detect these env vars and start in
+  TLS mode):
+
+  APP_PORT=8800 CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem cargo run --release
+
+- For local development you can generate a temporary self-signed certificate
+  (the repository includes optional helpers to generate one). In browsers you
+  will need to accept the self-signed certificate (or install it into your
+  trust store) to avoid certificate warnings.
+
+What changes in the OpenAPI docs
+
+- When TLS is active (CERT_PATH/KEY_PATH set), the OpenAPI `servers` array is
+  updated to include `https://localhost:<PORT>` so the Swagger UI "Try it out"
+  uses HTTPS URLs by default. If TLS is not enabled, `http://localhost:<PORT>` is used.
+
+Testing TLS and HTTP/2
+
+- Quick curl test (accepts self-signed certs with `-k`):
+
+  curl -vk --http2 https://localhost:8800/docs
+
+  The `--http2` flag ensures curl attempts HTTP/2; `-k` is only needed for
+  self-signed certificates during development.
+
+- Use the browser DevTools Network panel to confirm the negotiated protocol
+  (look for "h2" or "http/2" in the Protocol/Version column). If the
+  browser refuses to connect because of an untrusted cert, either accept the
+  warning for testing or install the certificate into your local trust store.
+
+Notes and troubleshooting
+
+- Browsers will not use cleartext h2c (HTTP/2 prior knowledge) for remote sites
+  — TLS + ALPN is the standard path for production-grade HTTP/2.
+- If you see the Swagger UI still calling `http://...` endpoints after enabling
+  TLS, confirm the server was restarted with `CERT_PATH`/`KEY_PATH` set and
+  check the `servers` field in `/api-docs/openapi.json`.
+- For automated tests or non-browser clients you can use `curl --http2-prior-knowledge`
+  against an h2c server, but note that this project uses TLS/ALPN for browser
+  compatibility and does not enable h2c by default.
+
+If anything in your environment prevents the server from reading your cert/key
+files (permission issues, wrong paths), the application will fall back to
+plaintext HTTP on the configured `APP_PORT` unless you explicitly handle
+failures in your deployment scripts.

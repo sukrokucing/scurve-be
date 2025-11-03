@@ -22,8 +22,25 @@ async fn main() -> anyhow::Result<()> {
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("listening on {}", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router.into_make_service()).await?;
+    // Prefer TLS if cert and key are provided via environment (CERT_PATH, KEY_PATH)
+    // which are loaded by `load_env()` earlier. When TLS is enabled axum-server
+    // will advertise ALPN and support HTTP/2 to browsers.
+    let cert = std::env::var("CERT_PATH").ok();
+    let key = std::env::var("KEY_PATH").ok();
+
+    if let (Some(cert_path), Some(key_path)) = (cert, key) {
+        tracing::info!("starting TLS with cert={} key={}", cert_path, key_path);
+        let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
+        // Rustls+ALPN will negotiate HTTP/2 with clients (browsers) automatically.
+        axum_server::bind_rustls(addr, cfg)
+            .serve(router.into_make_service())
+            .await?;
+    } else {
+        tracing::info!("starting plaintext HTTP (no CERT_PATH/KEY_PATH provided)");
+        // plaintext (no TLS)
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, router.into_make_service()).await?;
+    }
 
     Ok(())
 }

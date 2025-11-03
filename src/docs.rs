@@ -506,8 +506,27 @@ fn apply_response_examples(operation: &mut Value) {
 }
 
 fn ensure_servers(doc: &mut Value, port: u16) {
-	if doc.get("servers").is_none() {
-		doc["servers"] = json!([{ "url": format!("http://localhost:{port}") }]);
+	// Determine whether the running server will use TLS. If CERT_PATH+KEY_PATH are
+	// provided (or USE_SELF_SIGNED_TLS is set), prefer https so Swagger Try-it-out
+	// will call the backend over TLS.
+	let tls_enabled = std::env::var("CERT_PATH").is_ok() && std::env::var("KEY_PATH").is_ok()
+		|| std::env::var("USE_SELF_SIGNED_TLS").is_ok();
+
+	let scheme = if tls_enabled { "https" } else { "http" };
+
+	let server_url = format!("{}://localhost:{}", scheme, port);
+
+	match doc.get_mut("servers") {
+		Some(Value::Array(arr)) => {
+			// ensure an entry for our server_url exists
+			let has = arr.iter().any(|v| v.get("url").and_then(Value::as_str) == Some(server_url.as_str()));
+			if !has {
+				arr.push(json!({ "url": server_url }));
+			}
+		}
+		_ => {
+			doc["servers"] = json!([{ "url": server_url }]);
+		}
 	}
 }
 
