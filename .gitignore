@@ -1,0 +1,4 @@
+# Ignore Rust build output
+target/
+.env
+scurve.sqlite
