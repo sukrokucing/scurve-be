@@ -12,19 +12,25 @@ use crate::utils::utc_now;
 
 #[utoipa::path(
     get,
-    path = "/tasks",
+    path = "/projects/{project_id}/tasks",
     tag = "Tasks",
+    params(("project_id" = Uuid, Path, description = "Project id")),
     responses((status = 200, description = "List tasks", body = [Task]))
 )]
-pub async fn list_tasks(State(state): State<AppState>, auth: AuthUser) -> AppResult<Json<Vec<Task>>> {
+pub async fn list_tasks(
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+    auth: AuthUser,
+) -> AppResult<Json<Vec<Task>>> {
+    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+
     let tasks = sqlx::query_as::<_, DbTask>(
         "SELECT t.id, t.project_id, t.title, t.status, t.due_date, t.created_at, t.updated_at, t.deleted_at
          FROM tasks t
-         INNER JOIN projects p ON p.id = t.project_id
-         WHERE p.user_id = ? AND p.deleted_at IS NULL AND t.deleted_at IS NULL
+         WHERE t.project_id = ? AND t.deleted_at IS NULL
          ORDER BY t.created_at DESC",
     )
-    .bind(auth.user_id)
+    .bind(project_id)
     .fetch_all(&state.pool)
     .await?;
 
@@ -45,10 +51,11 @@ pub async fn list_tasks(State(state): State<AppState>, auth: AuthUser) -> AppRes
 )]
 pub async fn create_task(
     State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
     auth: AuthUser,
     Json(payload): Json<TaskCreateRequest>,
 ) -> AppResult<(StatusCode, Json<Task>)> {
-    ensure_project_membership(&state.pool, auth.user_id, payload.project_id).await?;
+    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
 
     let task_id = Uuid::new_v4();
     let now = utc_now();
@@ -58,7 +65,7 @@ pub async fn create_task(
         "INSERT INTO tasks (id, project_id, title, status, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task_id)
-    .bind(payload.project_id)
+    .bind(project_id)
     .bind(&payload.title)
     .bind(status)
     .bind(payload.due_date)
@@ -67,7 +74,7 @@ pub async fn create_task(
     .execute(&state.pool)
     .await?;
 
-    let task = fetch_task(&state.pool, auth.user_id, task_id).await?;
+    let task = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
     let task: Task = task.try_into()?;
 
     Ok((StatusCode::CREATED, Json(task)))
@@ -75,19 +82,19 @@ pub async fn create_task(
 
 #[utoipa::path(
     put,
-    path = "/tasks/{id}",
+    path = "/projects/{project_id}/tasks/{id}",
     tag = "Tasks",
-    params(("id" = Uuid, Path, description = "Task id")),
+    params(("project_id" = Uuid, Path, description = "Project id"), ("id" = Uuid, Path, description = "Task id")),
     request_body = TaskUpdateRequest,
     responses((status = 200, description = "Task updated", body = Task))
 )]
 pub async fn update_task(
     State(state): State<AppState>,
     auth: AuthUser,
-    Path(id): Path<Uuid>,
+    Path((project_id, id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<TaskUpdateRequest>,
 ) -> AppResult<Json<Task>> {
-    let mut task = fetch_task(&state.pool, auth.user_id, id).await?;
+    let mut task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
 
     let TaskUpdateRequest {
         title,
@@ -126,23 +133,24 @@ pub async fn update_task(
 
 #[utoipa::path(
     delete,
-    path = "/tasks/{id}",
+    path = "/projects/{project_id}/tasks/{id}",
     tag = "Tasks",
-    params(("id" = Uuid, Path, description = "Task id")),
+    params(("project_id" = Uuid, Path, description = "Project id"), ("id" = Uuid, Path, description = "Task id")),
     responses((status = 204, description = "Task soft deleted"))
 )]
 pub async fn delete_task(
     State(state): State<AppState>,
     auth: AuthUser,
-    Path(id): Path<Uuid>,
+    Path((project_id, id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<StatusCode> {
-    let _ = fetch_task(&state.pool, auth.user_id, id).await?;
+    let _ = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
 
     let now = utc_now();
-    let affected = sqlx::query("UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
+    let affected = sqlx::query("UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND project_id = ? AND deleted_at IS NULL")
         .bind(now)
         .bind(now)
         .bind(id)
+        .bind(project_id)
         .execute(&state.pool)
         .await?;
 
@@ -170,14 +178,15 @@ async fn ensure_project_membership(pool: &SqlitePool, user_id: Uuid, project_id:
     Ok(())
 }
 
-async fn fetch_task(pool: &SqlitePool, user_id: Uuid, task_id: Uuid) -> AppResult<DbTask> {
+async fn fetch_task(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id: Uuid) -> AppResult<DbTask> {
     sqlx::query_as::<_, DbTask>(
         "SELECT t.id, t.project_id, t.title, t.status, t.due_date, t.created_at, t.updated_at, t.deleted_at
          FROM tasks t
          INNER JOIN projects p ON p.id = t.project_id
-         WHERE t.id = ? AND p.user_id = ? AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
+         WHERE t.id = ? AND t.project_id = ? AND p.user_id = ? AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
     )
     .bind(task_id)
+    .bind(project_id)
     .bind(user_id)
     .fetch_optional(pool)
     .await?

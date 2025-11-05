@@ -27,6 +27,8 @@ enum Commands {
     MigrateStatus,
     /// Roll back the last applied migration
     MigrateRollback,
+    /// Run integration/test suite via `cargo test`
+    RunTests,
 }
 
 #[tokio::main]
@@ -64,6 +66,20 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("no migrations were rolled back")?;
             println!("Rolled back last migration");
+        }
+        Commands::RunTests => {
+            // Spawn cargo test for this crate
+            use std::process::Command;
+            let status = Command::new("cargo")
+                .arg("test")
+                .arg("--manifest-path")
+                .arg(env!("CARGO_MANIFEST_DIR").to_string() + "/Cargo.toml")
+                .status()
+                .context("failed to spawn cargo test")?;
+
+            if !status.success() {
+                anyhow::bail!("tests failed");
+            }
         }
     }
 

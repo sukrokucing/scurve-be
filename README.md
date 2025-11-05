@@ -118,8 +118,10 @@ The server listens on `0.0.0.0:<APP_PORT>` (default `8000`). Visit `http://local
 | POST | `/auth/logout` | ✅ | Stateless logout acknowledgement |
 | GET/POST | `/projects` | ✅ | List / create projects |
 | GET/PUT/DELETE | `/projects/{id}` | ✅ | Read / update / soft delete project |
-| GET/POST | `/tasks` | ✅ | List / create tasks |
-| PUT/DELETE | `/tasks/{id}` | ✅ | Update / soft delete task |
+| GET/POST | `/projects/{project_id}/tasks` | ✅ | List / create tasks (project scoped) |
+| PUT/DELETE | `/projects/{project_id}/tasks/{id}` | ✅ | Update / soft delete task (project scoped) |
+| GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | ✅ | List / create progress entries (task scoped) |
+| PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | ✅ | Update / soft delete a progress entry (task scoped) |
 
 Requests requiring auth expect an `Authorization: Bearer <token>` header. Register then log in to retrieve a token.
 
@@ -128,7 +130,7 @@ Requests requiring auth expect an `Authorization: Bearer <token>` header. Regist
 - Soft deletes are implemented by setting `deleted_at`; queries filter out non-null values.
 - IDs are generated with `Uuid::new_v4()` and timestamps use `chrono::Utc::now()`.
 - The project integrates `tower-http` tracing; set `RUST_LOG=debug` to expand logs.
-- Tests are not included; consider wiring integration tests with an ephemeral SQLite database for coverage.
+- Integration tests are included (see `tests/api_integration.rs`) and exercise auth → project → task → progress flows using an ephemeral SQLite database; run them with `cargo test`.
 
 ## Docker Usage
 

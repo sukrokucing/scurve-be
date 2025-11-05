@@ -21,12 +21,16 @@ use crate::models;
 			models::task::Task,
 			models::task::TaskCreateRequest,
 			models::task::TaskUpdateRequest
+			,models::progress::Progress,
+			models::progress::ProgressCreateRequest,
+			models::progress::ProgressUpdateRequest
 		)
 	),
 	tags(
-		(name = "Auth", description = "Authentication endpoints"),
-		(name = "Projects", description = "Project management"),
-		(name = "Tasks", description = "Task management")
+			(name = "Auth", description = "Authentication endpoints"),
+			(name = "Projects", description = "Project management"),
+			(name = "Tasks", description = "Task management"),
+			(name = "Progress", description = "Task progress entries")
 	)
 )]
 pub struct ApiDoc;
@@ -212,11 +216,12 @@ fn synthetic_paths() -> Map<String, Value> {
 	);
 
 	paths.insert(
-		"/tasks".to_string(),
+		"/projects/{project_id}/tasks".to_string(),
 		json!({
 			"get": {
-				"tags": ["Tasks"],
+				"tags": ["Progress"],
 				"security": [{"bearerAuth": []}],
+				"parameters": [{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
 				"responses": {
 					"200": {
 						"description": "List tasks",
@@ -225,8 +230,9 @@ fn synthetic_paths() -> Map<String, Value> {
 				}
 			},
 			"post": {
-				"tags": ["Tasks"],
+				"tags": ["Progress"],
 				"security": [{"bearerAuth": []}],
+				"parameters": [{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
 				"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskCreateRequest"}}}},
 				"responses": {
 					"201": {
@@ -239,20 +245,85 @@ fn synthetic_paths() -> Map<String, Value> {
 	);
 
 	paths.insert(
-		"/tasks/{id}".to_string(),
+		"/projects/{project_id}/tasks/{id}".to_string(),
 		json!({
 			"put": {
-				"tags": ["Tasks"],
+				"tags": ["Progress"],
 				"security": [{"bearerAuth": []}],
-				"parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+				"parameters": [
+					{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+				],
 				"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskUpdateRequest"}}}},
 				"responses": {"200": {"description": "Task updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Task"}}}}}
 			},
 			"delete": {
+				"tags": ["Progress"],
+				"security": [{"bearerAuth": []}],
+				"parameters": [
+					{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+				],
+				"responses": {"204": {"description": "Task soft deleted"}}
+			}
+		}),
+	);
+
+	paths.insert(
+		"/projects/{project_id}/tasks/{task_id}/progress".to_string(),
+		json!({
+			"get": {
 				"tags": ["Tasks"],
 				"security": [{"bearerAuth": []}],
-				"parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-				"responses": {"204": {"description": "Task soft deleted"}}
+				"parameters": [
+					{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+				],
+				"responses": {
+					"200": {
+						"description": "List progress entries",
+						"content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Progress"}}}}
+					}
+				}
+			},
+			"post": {
+				"tags": ["Tasks"],
+				"security": [{"bearerAuth": []}],
+				"parameters": [
+					{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+				],
+				"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProgressCreateRequest"}}}},
+				"responses": {
+					"201": {"description": "Progress created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Progress"}}}}
+				}
+			}
+		}),
+	);
+
+	paths.insert(
+		"/projects/{project_id}/tasks/{task_id}/progress/{id}".to_string(),
+		json!({
+			"put": {
+				"tags": ["Tasks"],
+				"security": [{"bearerAuth": []}],
+				"parameters": [
+					{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+				],
+				"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProgressUpdateRequest"}}}},
+				"responses": {"200": {"description": "Progress updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Progress"}}}}}
+			},
+			"delete": {
+				"tags": ["Tasks"],
+				"security": [{"bearerAuth": []}],
+				"parameters": [
+					{"name": "project_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+					{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+				],
+				"responses": {"204": {"description": "Progress soft deleted"}}
 			}
 		}),
 	);
@@ -382,7 +453,6 @@ fn apply_request_examples(operation: &mut Value) {
 			"theme_color": "#2ecc71"
 		})),
 		"#/components/schemas/TaskCreateRequest" => Some(json!({
-			"project_id": "00000000-0000-0000-0000-000000000000",
 			"title": "Define launch checklist",
 			"status": "pending",
 			"due_date": "2025-10-10T10:00:00Z"
@@ -391,6 +461,15 @@ fn apply_request_examples(operation: &mut Value) {
 			"title": "Refine checklist",
 			"status": "in_progress",
 			"due_date": "2025-11-01T10:00:00Z"
+		})),
+		"#/components/schemas/ProgressCreateRequest" => Some(json!({
+			"project_id": "00000000-0000-0000-0000-000000000000",
+			"progress": 50,
+			"note": "Halfway there"
+		})),
+		"#/components/schemas/ProgressUpdateRequest" => Some(json!({
+			"progress": 75,
+			"note": "Almost done"
 		})),
 		_ => None,
 	};
@@ -454,6 +533,16 @@ fn apply_response_examples(operation: &mut Value) {
 						"updated_at": "2025-10-01T10:00:00Z",
 						"deleted_at": null
 					})),
+					"#/components/schemas/Progress" => Some(json!({
+						"id": "33333333-3333-3333-3333-333333333333",
+						"task_id": "22222222-2222-2222-2222-222222222222",
+						"project_id": "00000000-0000-0000-0000-000000000000",
+						"progress": 50,
+						"note": "Halfway done",
+						"created_at": "2025-10-05T10:00:00Z",
+						"updated_at": "2025-10-05T10:00:00Z",
+						"deleted_at": null
+					})),
 					_ => None,
 				};
 
@@ -490,6 +579,16 @@ fn apply_response_examples(operation: &mut Value) {
 								"due_date": "2025-10-10T10:00:00Z",
 								"created_at": "2025-10-01T10:00:00Z",
 								"updated_at": "2025-10-01T10:00:00Z",
+								"deleted_at": null
+							}])),
+							"#/components/schemas/Progress" => Some(json!([{
+								"id": "33333333-3333-3333-3333-333333333333",
+								"task_id": "22222222-2222-2222-2222-222222222222",
+								"project_id": "00000000-0000-0000-0000-000000000000",
+								"progress": 50,
+								"note": "Halfway done",
+								"created_at": "2025-10-05T10:00:00Z",
+								"updated_at": "2025-10-05T10:00:00Z",
 								"deleted_at": null
 							}])),
 							_ => None,

@@ -9,7 +9,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::errors::AppError;
 use crate::jwt::JwtConfig;
-use crate::routes::{auth, projects, tasks};
+use crate::routes::{auth, projects, tasks, progress};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -48,16 +48,26 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
         .route("/:id", put(projects::update_project))
         .route("/:id", delete(projects::delete_project));
 
+    // Tasks are scoped to a project: /projects/:project_id/tasks
     let task_routes = Router::new()
         .route("/", get(tasks::list_tasks))
         .route("/", post(tasks::create_task))
         .route("/:id", put(tasks::update_task))
         .route("/:id", delete(tasks::delete_task));
 
+    let progress_routes = Router::new()
+        .route("/", get(progress::list_progress))
+        .route("/", post(progress::create_progress))
+        .route("/:id", put(progress::update_progress))
+        .route("/:id", delete(progress::delete_progress));
+
     let router = Router::new()
         .nest("/auth", auth_routes)
         .nest("/projects", project_routes)
-        .nest("/tasks", task_routes)
+        // nest tasks under project scope
+        .nest("/projects/:project_id/tasks", task_routes)
+        // nest progress under task scope
+        .nest("/projects/:project_id/tasks/:task_id/progress", progress_routes)
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

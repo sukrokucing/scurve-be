@@ -49,7 +49,6 @@ impl TryFrom<DbTask> for Task {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TaskCreateRequest {
-    pub project_id: Uuid,
     #[schema(example = "Define launch checklist")]
     pub title: String,
     #[schema(example = "pending")]
