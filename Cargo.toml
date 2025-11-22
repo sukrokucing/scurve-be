@@ -22,6 +22,7 @@ dotenvy = "0.15"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 utoipa = { version = "4", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "7", features = ["axum", "reqwest"] }
+serde_path_to_error = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 clap = { version = "4", features = ["derive"] }
@@ -31,7 +32,13 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 [dev-dependencies]
 tempfile = "3"
 tower = "0.5"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+ureq = "2"
 
 [profile.release]
-codegen-units = 1
-lto = true
+opt-level = 2        # Lower than 3 -> much faster to build, still optimized
+lto = "thin"         # "fat" or true is slower to build; "thin" is faster but still optimizes cross-crate
+codegen-units = 8    # Parallelize code generation across threads (faster build, a bit larger binary)
+incremental = true   # Reuse previous compilation results
+strip = "symbols"    # Reduces binary size, faster linking on some systems
+panic = "abort"      # Removes unwinding code, faster compile + smaller binary

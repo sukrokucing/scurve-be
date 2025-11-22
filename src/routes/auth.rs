@@ -4,11 +4,13 @@ use axum::Json;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
+
 use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::user::{AuthResponse, DbUser, LoginRequest, RegisterRequest, User};
 use crate::utils::{hash_password, utc_now, verify_password};
+use crate::db::row_parsers;
 
 #[derive(Debug, Serialize)]
 pub struct MessageResponse {
@@ -70,14 +72,33 @@ pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Json<AuthResponse>> {
-    let db_user = sqlx::query_as::<_, DbUser>(
+    // Try typed mapping first
+    let simple = sqlx::query_as::<_, DbUser>(
         "SELECT id, name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at FROM users WHERE email = ? AND deleted_at IS NULL",
     )
     .bind(&payload.email)
     .fetch_optional(&state.pool)
-    .await?;
+    .await;
 
-    let db_user = db_user.ok_or_else(|| AppError::unauthorized("invalid credentials"))?;
+    let db_user = match simple {
+        Ok(Some(u)) => u,
+        Ok(None) => return Err(AppError::unauthorized("invalid credentials")),
+        Err(_) => {
+            // Fallback: select textified id and parse manually
+            let fallback = sqlx::query(
+                "SELECT \
+                   CASE WHEN typeof(id)='blob' THEN lower(substr(hex(id),1,8) || '-' || substr(hex(id),9,4) || '-' || substr(hex(id),13,4) || '-' || substr(hex(id),17,4) || '-' || substr(hex(id),21)) ELSE id END as id, \
+                   name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at \
+                 FROM users WHERE email = ? AND deleted_at IS NULL",
+            )
+            .bind(&payload.email)
+            .fetch_optional(&state.pool)
+            .await?;
+
+            let row = fallback.ok_or_else(|| AppError::unauthorized("invalid credentials"))?;
+            row_parsers::db_user_from_row(&row)?
+        }
+    };
 
     let password_ok = verify_password(&payload.password, &db_user.password_hash)?;
     if !password_ok {
@@ -128,11 +149,34 @@ async fn ensure_email_available(pool: &SqlitePool, email: &str) -> AppResult<()>
 }
 
 async fn fetch_user_by_id(pool: &SqlitePool, user_id: uuid::Uuid) -> AppResult<DbUser> {
-    sqlx::query_as::<_, DbUser>(
+    let simple = sqlx::query_as::<_, DbUser>(
         "SELECT id, name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at FROM users WHERE id = ? AND deleted_at IS NULL",
     )
     .bind(user_id)
     .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::not_found("user not found"))
+    .await?;
+
+    if let Some(u) = simple {
+        return Ok(u);
+    }
+
+    // Fallback: handle blob/text mixed UUID storage by selecting textified id
+    let id_case = crate::db::uuid_sql::case_uuid("id");
+    let match_id = crate::db::uuid_sql::match_uuid_clause("id");
+    let sql = format!(
+        "SELECT {} , name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at FROM users WHERE {} AND deleted_at IS NULL",
+        id_case, match_id
+    );
+
+    let fallback = sqlx::query(&sql)
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await?;
+
+    if let Some(row) = fallback {
+        return Ok(row_parsers::db_user_from_row(&row)?);
+    }
+
+    Err(AppError::not_found("user not found"))
 }

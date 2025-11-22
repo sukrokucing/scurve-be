@@ -1,4 +1,5 @@
 mod app;
+#[path = "db/mod.rs"]
 mod db;
 mod docs;
 mod errors;

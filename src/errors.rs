@@ -21,7 +21,7 @@ pub enum AppError {
     Configuration(String),
     #[error("token error: {0}")]
     Token(String),
-    #[error("database error")]
+    #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("internal server error: {0}")]
     Internal(String),

@@ -1,4 +1,5 @@
 pub mod app;
+#[path = "db/mod.rs"]
 pub mod db;
 pub mod docs;
 pub mod errors;

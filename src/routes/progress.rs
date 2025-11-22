@@ -1,8 +1,10 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, State, Query};
+use serde::Deserialize;
 use axum::http::StatusCode;
 use axum::Json;
 use sqlx::SqlitePool;
 use uuid::Uuid;
+use crate::db::{uuid_sql, row_parsers};
 
 use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
@@ -24,12 +26,154 @@ pub async fn list_progress(
 ) -> AppResult<Json<Vec<Progress>>> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
 
-    let rows = sqlx::query_as::<_, DbProgress>(
+    let simple = sqlx::query_as::<_, DbProgress>(
         "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(task_id)
     .fetch_all(&state.pool)
+    .await;
+
+    let rows = match simple {
+        Ok(r) => r,
+        Err(_) => {
+            let id_case = uuid_sql::case_uuid("id");
+            let project_case = uuid_sql::case_uuid("project_id");
+            let task_case = uuid_sql::case_uuid("task_id");
+            let sql = format!(
+                "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                id_case, project_case, task_case
+            );
+
+            let rows = sqlx::query(&sql)
+                .bind(task_id.to_string())
+                .fetch_all(&state.pool)
+                .await?;
+
+            let mut parsed = Vec::with_capacity(rows.len());
+            for row in rows {
+                parsed.push(row_parsers::db_progress_from_row(&row)?);
+            }
+
+            parsed
+        }
+    };
+
+    let items = rows.into_iter().map(Progress::try_from).collect::<Result<_, _>>()?;
+    Ok(Json(items))
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct ProgressFilter {
+    pub task_id: Option<Uuid>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project_id}/progress",
+    tag = "Progress",
+    params(("project_id" = Uuid, Path, description = "Project id")),
+    responses((status = 200, description = "List progress entries", body = [Progress]))
+)]
+#[allow(dead_code)]
+pub async fn list_project_progress(
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+    Query(filter): Query<ProgressFilter>,
+    auth: AuthUser,
+) -> AppResult<Json<Vec<Progress>>> {
+    // verify project belongs to user
+    let owner = sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM projects WHERE id = ? AND deleted_at IS NULL",
+    )
+    .bind(project_id)
+    .fetch_optional(&state.pool)
     .await?;
+
+    let owner = owner.ok_or_else(|| AppError::not_found("project not found"))?;
+    if owner != auth.user_id {
+        return Err(AppError::forbidden("not allowed to access this project"));
+    }
+
+    let rows = if let Some(task_id) = filter.task_id {
+        // ensure task belongs to project
+        let t_owner = sqlx::query_scalar::<_, Uuid>(
+            "SELECT p.user_id FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE p.id = ? AND t.id = ? AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
+        )
+        .bind(project_id)
+        .bind(task_id)
+        .fetch_optional(&state.pool)
+        .await?;
+
+        let t_owner = t_owner.ok_or_else(|| AppError::not_found("task not found"))?;
+        if t_owner != auth.user_id {
+            return Err(AppError::forbidden("not allowed to access this task"));
+        }
+
+        let simple = sqlx::query_as::<_, DbProgress>(
+            "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+        )
+        .bind(task_id)
+        .fetch_all(&state.pool)
+        .await;
+
+        match simple {
+            Ok(r) => r,
+            Err(_) => {
+                let id_case = uuid_sql::case_uuid("id");
+                let project_case = uuid_sql::case_uuid("project_id");
+                let task_case = uuid_sql::case_uuid("task_id");
+                let sql = format!(
+                    "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                    id_case, project_case, task_case
+                );
+
+                let rows = sqlx::query(&sql)
+                    .bind(task_id.to_string())
+                    .fetch_all(&state.pool)
+                    .await?;
+
+                let mut parsed = Vec::with_capacity(rows.len());
+                for row in rows {
+                    parsed.push(row_parsers::db_progress_from_row(&row)?);
+                }
+
+                parsed
+            }
+        }
+    } else {
+        let simple = sqlx::query_as::<_, DbProgress>(
+            "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+        )
+        .bind(project_id)
+        .fetch_all(&state.pool)
+        .await;
+
+        match simple {
+            Ok(r) => r,
+            Err(_) => {
+                let id_case = uuid_sql::case_uuid("id");
+                let project_case = uuid_sql::case_uuid("project_id");
+                let task_case = uuid_sql::case_uuid("task_id");
+                let sql = format!(
+                    "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                    id_case, project_case, task_case
+                );
+
+                let rows = sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .fetch_all(&state.pool)
+                    .await?;
+
+                let mut parsed = Vec::with_capacity(rows.len());
+                for row in rows {
+                    parsed.push(row_parsers::db_progress_from_row(&row)?);
+                }
+
+                parsed
+            }
+        }
+    };
 
     let items = rows.into_iter().map(Progress::try_from).collect::<Result<_, _>>()?;
     Ok(Json(items))
@@ -71,12 +215,34 @@ pub async fn create_progress(
     .execute(&state.pool)
     .await?;
 
-    let row = sqlx::query_as::<_, DbProgress>(
+    let simple = sqlx::query_as::<_, DbProgress>(
         "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE id = ?",
     )
     .bind(id)
     .fetch_one(&state.pool)
-    .await?;
+    .await;
+
+    let row = match simple {
+        Ok(r) => r,
+        Err(_) => {
+            let fallback = sqlx::query(
+                "SELECT \
+                   CASE WHEN typeof(id)='blob' THEN lower(substr(hex(id),1,8) || '-' || substr(hex(id),9,4) || '-' || substr(hex(id),13,4) || '-' || substr(hex(id),17,4) || '-' || substr(hex(id),21)) ELSE id END as id, \
+                   CASE WHEN typeof(project_id)='blob' THEN lower(substr(hex(project_id),1,8) || '-' || substr(hex(project_id),9,4) || '-' || substr(hex(project_id),13,4) || '-' || substr(hex(project_id),17,4) || '-' || substr(hex(project_id),21)) ELSE project_id END as project_id, \
+                   CASE WHEN typeof(task_id)='blob' THEN lower(substr(hex(task_id),1,8) || '-' || substr(hex(task_id),9,4) || '-' || substr(hex(task_id),13,4) || '-' || substr(hex(task_id),17,4) || '-' || substr(hex(task_id),21)) ELSE task_id END as task_id, \
+                   progress, note, created_at, updated_at, deleted_at \
+                 FROM task_progress WHERE ((typeof(id)='blob' AND hex(id)=upper(replace(?,'-',''))) OR (typeof(id)='text' AND id = ?))",
+            )
+            .bind(id.to_string())
+            .bind(id.to_string())
+            .fetch_optional(&state.pool)
+            .await?;
+
+            let row = fallback.ok_or_else(|| AppError::not_found("progress entry not found"))?;
+
+                row_parsers::db_progress_from_row(&row)?
+        }
+    };
 
     let item: Progress = row.try_into()?;
     Ok((StatusCode::CREATED, Json(item)))
@@ -98,14 +264,36 @@ pub async fn update_progress(
 ) -> AppResult<Json<Progress>> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
 
-    let mut row = sqlx::query_as::<_, DbProgress>(
+    let simple = sqlx::query_as::<_, DbProgress>(
         "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE id = ? AND task_id = ? AND deleted_at IS NULL",
     )
     .bind(id)
     .bind(task_id)
     .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::not_found("progress entry not found"))?;
+    .await?;
+
+    let mut row = match simple {
+        Some(r) => r,
+        None => {
+            // try fallback selecting textified UUIDs
+            let fallback = sqlx::query(
+                "SELECT \
+                   CASE WHEN typeof(id)='blob' THEN lower(substr(hex(id),1,8) || '-' || substr(hex(id),9,4) || '-' || substr(hex(id),13,4) || '-' || substr(hex(id),17,4) || '-' || substr(hex(id),21)) ELSE id END as id, \
+                   CASE WHEN typeof(project_id)='blob' THEN lower(substr(hex(project_id),1,8) || '-' || substr(hex(project_id),9,4) || '-' || substr(hex(project_id),13,4) || '-' || substr(hex(project_id),17,4) || '-' || substr(hex(project_id),21)) ELSE project_id END as project_id, \
+                   CASE WHEN typeof(task_id)='blob' THEN lower(substr(hex(task_id),1,8) || '-' || substr(hex(task_id),9,4) || '-' || substr(hex(task_id),13,4) || '-' || substr(hex(task_id),17,4) || '-' || substr(hex(task_id),21)) ELSE task_id END as task_id, \
+                   progress, note, created_at, updated_at, deleted_at \
+                 FROM task_progress WHERE ((typeof(id)='blob' AND hex(id)=upper(replace(?,'-',''))) OR (typeof(id)='text' AND id = ?)) AND task_id = ? AND deleted_at IS NULL",
+            )
+            .bind(id.to_string())
+            .bind(id.to_string())
+            .bind(task_id.to_string())
+            .fetch_optional(&state.pool)
+            .await?;
+
+            let row = fallback.ok_or_else(|| AppError::not_found("progress entry not found"))?;
+            row_parsers::db_progress_from_row(&row)?
+        }
+    };
 
     if let Some(p) = payload.progress {
         if p < 0 || p > 100 {
@@ -162,6 +350,54 @@ pub async fn delete_progress(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project_id}/tasks/{task_id}/progress/{id}",
+    tag = "Progress",
+    params(("project_id" = Uuid, Path, description = "Project id"), ("task_id" = Uuid, Path, description = "Task id"), ("id" = Uuid, Path, description = "Progress id")),
+    responses((status = 200, description = "Progress detail", body = Progress))
+)]
+pub async fn get_progress(
+    State(state): State<AppState>,
+    Path((project_id, task_id, id)): Path<(Uuid, Uuid, Uuid)>,
+    auth: AuthUser,
+) -> AppResult<Json<Progress>> {
+    ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
+
+    let simple = sqlx::query_as::<_, DbProgress>(
+        "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE id = ? AND task_id = ? AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(task_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let row = match simple {
+        Some(r) => r,
+        None => {
+            let fallback = sqlx::query(
+                "SELECT \
+                   CASE WHEN typeof(id)='blob' THEN lower(substr(hex(id),1,8) || '-' || substr(hex(id),9,4) || '-' || substr(hex(id),13,4) || '-' || substr(hex(id),17,4) || '-' || substr(hex(id),21)) ELSE id END as id, \
+                   CASE WHEN typeof(project_id)='blob' THEN lower(substr(hex(project_id),1,8) || '-' || substr(hex(project_id),9,4) || '-' || substr(hex(project_id),13,4) || '-' || substr(hex(project_id),17,4) || '-' || substr(hex(project_id),21)) ELSE project_id END as project_id, \
+                   CASE WHEN typeof(task_id)='blob' THEN lower(substr(hex(task_id),1,8) || '-' || substr(hex(task_id),9,4) || '-' || substr(hex(task_id),13,4) || '-' || substr(hex(task_id),17,4) || '-' || substr(hex(task_id),21)) ELSE task_id END as task_id, \
+                   progress, note, created_at, updated_at, deleted_at \
+                 FROM task_progress WHERE ((typeof(id)='blob' AND hex(id)=upper(replace(?,'-',''))) OR (typeof(id)='text' AND id = ?)) AND task_id = ? AND deleted_at IS NULL",
+            )
+            .bind(id.to_string())
+            .bind(id.to_string())
+            .bind(task_id.to_string())
+            .fetch_optional(&state.pool)
+            .await?;
+
+            let row = fallback.ok_or_else(|| AppError::not_found("progress entry not found"))?;
+            row_parsers::db_progress_from_row(&row)?
+        }
+    };
+
+    let item: Progress = row.try_into()?;
+    Ok(Json(item))
 }
 
 async fn ensure_task_belongs_to_user(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id: Uuid) -> AppResult<()> {

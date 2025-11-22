@@ -17,3 +17,5 @@ pub async fn init() -> anyhow::Result<SqlitePool> {
 
     Ok(pool)
 }
+
+pub mod uuid_sql;
