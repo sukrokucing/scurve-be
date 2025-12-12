@@ -1,0 +1,2064 @@
+{
+  "components": {
+    "schemas": {
+      "ActualPoint": {
+        "properties": {
+          "actual": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "actual"
+        ],
+        "type": "object"
+      },
+      "AuthResponse": {
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        },
+        "required": [
+          "token",
+          "user"
+        ],
+        "type": "object"
+      },
+      "DashboardResponse": {
+        "properties": {
+          "actual": {
+            "items": {
+              "$ref": "#/components/schemas/ActualPoint"
+            },
+            "type": "array"
+          },
+          "plan": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectPlanPoint"
+            },
+            "type": "array"
+          },
+          "project": {
+            "$ref": "#/components/schemas/Project"
+          }
+        },
+        "required": [
+          "project",
+          "plan",
+          "actual"
+        ],
+        "type": "object"
+      },
+      "DependencyCreateRequest": {
+        "properties": {
+          "source_task_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "target_task_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type_": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_task_id",
+          "target_task_id"
+        ],
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "db_error": {
+            "nullable": true,
+            "type": "string"
+          },
+          "db_ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "db_ok"
+        ],
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "example": "ada@example.com",
+            "type": "string"
+          },
+          "password": {
+            "example": "S3cureP@ssw0rd",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "Progress": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "note": {
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "task_id",
+          "progress",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProgressCreateRequest": {
+        "properties": {
+          "note": {
+            "example": "Halfway done - waiting on review",
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "example": 75,
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "progress"
+        ],
+        "type": "object"
+      },
+      "ProgressUpdateRequest": {
+        "properties": {
+          "note": {
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Project": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "theme_color": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "theme_color",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProjectCreateRequest": {
+        "properties": {
+          "description": {
+            "example": "Prepare milestones for the product launch.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "example": "Launch Planning",
+            "type": "string"
+          },
+          "theme_color": {
+            "example": "#3498db",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProjectPlanCreateRequest": {
+        "properties": {
+          "date": {
+            "example": "2025-12-01T00:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "planned_progress": {
+            "example": 10,
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "planned_progress"
+        ],
+        "type": "object"
+      },
+      "ProjectPlanPoint": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "planned_progress": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "date",
+          "planned_progress",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProjectUpdateRequest": {
+        "properties": {
+          "description": {
+            "example": "Updated description",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "example": "Launch Planning",
+            "nullable": true,
+            "type": "string"
+          },
+          "theme_color": {
+            "example": "#2ecc71",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "email": {
+            "example": "ada@example.com",
+            "type": "string"
+          },
+          "name": {
+            "example": "Ada Lovelace",
+            "type": "string"
+          },
+          "password": {
+            "example": "S3cureP@ssw0rd",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "Task": {
+        "properties": {
+          "assignee": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "duration_days": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "end_date": {
+            "example": "2025-10-15T17:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "start_date": {
+            "example": "2025-10-01T09:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "title",
+          "status",
+          "progress",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "TaskBatchUpdatePayload": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskBatchUpdateRequest"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "type": "object"
+      },
+      "TaskBatchUpdateRequest": {
+        "properties": {
+          "assignee": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "example": "2025-11-01T10:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "end_date": {
+            "example": "2025-10-15T17:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "start_date": {
+            "example": "2025-10-01T09:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "TaskCreateRequest": {
+        "properties": {
+          "assignee": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "example": "2025-10-10T10:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "end_date": {
+            "example": "2025-10-15T17:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "example": 0,
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "start_date": {
+            "example": "2025-10-01T09:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "example": "pending",
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "example": "Define launch checklist",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "TaskDependency": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "source_task_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "target_task_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type_": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_task_id",
+          "target_task_id",
+          "type_",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "TaskUpdateRequest": {
+        "properties": {
+          "assignee": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "example": "2025-11-01T10:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "end_date": {
+            "example": "2025-10-15T17:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "start_date": {
+            "example": "2025-10-01T09:00:00Z",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "provider",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "s-curve team"
+    },
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "title": "s-curve",
+    "version": "0.1.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Health check"
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "email": "user@example.com",
+                "password": "password123"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "token": "eyJhbGciOiJIUzI1Ni...",
+                  "user": {
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "email": "ada@example.com",
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "name": "Ada Lovelace",
+                    "provider": "local",
+                    "provider_id": null,
+                    "updated_at": "2025-10-01T10:00:00Z"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            },
+            "description": "Login successful"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": {
+          "200": {
+            "description": "Logout acknowledged"
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-01T10:00:00Z",
+                  "deleted_at": null,
+                  "email": "ada@example.com",
+                  "id": "00000000-0000-0000-0000-000000000000",
+                  "name": "Ada Lovelace",
+                  "provider": "local",
+                  "provider_id": null,
+                  "updated_at": "2025-10-01T10:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "Current user"
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "email": "test@example.com",
+                "name": "Test User",
+                "password": "password123"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "token": "eyJhbGciOiJIUzI1Ni...",
+                  "user": {
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "email": "ada@example.com",
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "name": "Ada Lovelace",
+                    "provider": "local",
+                    "provider_id": null,
+                    "updated_at": "2025-10-01T10:00:00Z"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            },
+            "description": "User registered"
+          },
+          "409": {
+            "description": "Email already in use"
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/projects": {
+      "get": {
+        "operationId": "list_projects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "description": "Prepare milestones for the product launch.",
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "name": "Launch Planning",
+                    "theme_color": "#3498db",
+                    "updated_at": "2025-10-01T10:00:00Z",
+                    "user_id": "11111111-1111-1111-1111-111111111111"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List projects"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "operationId": "create_project",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "name": "My Project"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-01T10:00:00Z",
+                  "deleted_at": null,
+                  "description": "Prepare milestones for the product launch.",
+                  "id": "00000000-0000-0000-0000-000000000000",
+                  "name": "Launch Planning",
+                  "theme_color": "#3498db",
+                  "updated_at": "2025-10-01T10:00:00Z",
+                  "user_id": "11111111-1111-1111-1111-111111111111"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Project created"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{id}": {
+      "delete": {
+        "operationId": "delete_project",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project soft deleted"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "get": {
+        "operationId": "get_project",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-01T10:00:00Z",
+                  "deleted_at": null,
+                  "description": "Prepare milestones for the product launch.",
+                  "id": "00000000-0000-0000-0000-000000000000",
+                  "name": "Launch Planning",
+                  "theme_color": "#3498db",
+                  "updated_at": "2025-10-01T10:00:00Z",
+                  "user_id": "11111111-1111-1111-1111-111111111111"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Project detail"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "put": {
+        "operationId": "update_project",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "name": "Launch Planning - Updated"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-01T10:00:00Z",
+                  "deleted_at": null,
+                  "description": "Prepare milestones for the product launch.",
+                  "id": "00000000-0000-0000-0000-000000000000",
+                  "name": "Launch Planning",
+                  "theme_color": "#3498db",
+                  "updated_at": "2025-10-01T10:00:00Z",
+                  "user_id": "11111111-1111-1111-1111-111111111111"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Project updated"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{id}/critical-path": {
+      "get": {
+        "operationId": "get_project_critical_path",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CriticalPathResponse"
+                }
+              }
+            },
+            "description": "Critical path task ids"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{id}/dashboard": {
+      "get": {
+        "operationId": "get_project_dashboard",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "actual": [
+                    {
+                      "actual": 50,
+                      "date": "2025-10-05"
+                    }
+                  ],
+                  "plan": [
+                    {
+                      "created_at": "2025-10-01T10:00:00Z",
+                      "date": "2025-12-01T00:00:00Z",
+                      "id": "44444444-4444-4444-4444-444444444444",
+                      "planned_progress": 10,
+                      "project_id": "00000000-0000-0000-0000-000000000000",
+                      "updated_at": "2025-10-01T10:00:00Z"
+                    }
+                  ],
+                  "project": {
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "description": "Prepare milestones for the product launch.",
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "name": "Launch Planning",
+                    "theme_color": "#3498db",
+                    "updated_at": "2025-10-01T10:00:00Z",
+                    "user_id": "11111111-1111-1111-1111-111111111111"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardResponse"
+                }
+              }
+            },
+            "description": "Project dashboard"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{id}/plan": {
+      "delete": {
+        "operationId": "clear_project_plan",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project plan cleared"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "operationId": "update_project_plan",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": [
+                {
+                  "date": "2025-12-01T00:00:00Z",
+                  "planned_progress": 10
+                },
+                {
+                  "date": "2025-12-15T00:00:00Z",
+                  "planned_progress": 30
+                },
+                {
+                  "date": "2026-01-01T00:00:00Z",
+                  "planned_progress": 60
+                }
+              ],
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/ProjectPlanCreateRequest"
+                },
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectPlanPoint"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Project plan updated"
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{project_id}/dependencies": {
+      "get": {
+        "operationId": "list_dependencies",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "id": "55555555-5555-5555-5555-555555555555",
+                    "source_task_id": "22222222-2222-2222-2222-222222222222",
+                    "target_task_id": "66666666-6666-6666-6666-666666666666",
+                    "type": "finish_to_start"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskDependency"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List dependencies"
+          }
+        },
+        "tags": [
+          "Dependencies"
+        ]
+      },
+      "post": {
+        "operationId": "create_dependency",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "source_task_id": "22222222-2222-2222-2222-222222222222",
+                "target_task_id": "66666666-6666-6666-6666-666666666666",
+                "type": "finish_to_start"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/DependencyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-01T10:00:00Z",
+                  "id": "55555555-5555-5555-5555-555555555555",
+                  "source_task_id": "22222222-2222-2222-2222-222222222222",
+                  "target_task_id": "66666666-6666-6666-6666-666666666666",
+                  "type": "finish_to_start"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDependency"
+                }
+              }
+            },
+            "description": "Dependency created"
+          }
+        },
+        "tags": [
+          "Dependencies"
+        ]
+      }
+    },
+    "/projects/{project_id}/dependencies/{id}": {
+      "delete": {
+        "operationId": "delete_dependency",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Dependency id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Dependency deleted"
+          }
+        },
+        "tags": [
+          "Dependencies"
+        ]
+      }
+    },
+    "/projects/{project_id}/tasks": {
+      "get": {
+        "operationId": "list_tasks",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  [
+                    {
+                      "assignee": null,
+                      "created_at": "2025-10-01T10:00:00Z",
+                      "deleted_at": null,
+                      "due_date": "2025-10-10T10:00:00Z",
+                      "duration_days": 9,
+                      "end_date": "2025-10-10T17:00:00Z",
+                      "id": "22222222-2222-2222-2222-222222222222",
+                      "parent_id": null,
+                      "progress": 0,
+                      "project_id": "00000000-0000-0000-0000-000000000000",
+                      "start_date": "2025-10-01T09:00:00Z",
+                      "status": "pending",
+                      "title": "Define launch checklist",
+                      "updated_at": "2025-10-01T10:00:00Z"
+                    }
+                  ]
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Task"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List tasks"
+          }
+        },
+        "tags": [
+          "Tasks"
+        ]
+      },
+      "post": {
+        "operationId": "create_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "title": "Quick task"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TaskCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "assignee": null,
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "due_date": "2025-10-10T10:00:00Z",
+                    "duration_days": 9,
+                    "end_date": "2025-10-10T17:00:00Z",
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "parent_id": null,
+                    "progress": 0,
+                    "project_id": "00000000-0000-0000-0000-000000000000",
+                    "start_date": "2025-10-01T09:00:00Z",
+                    "status": "pending",
+                    "title": "Define launch checklist",
+                    "updated_at": "2025-10-01T10:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            },
+            "description": "Task created"
+          }
+        },
+        "tags": [
+          "Tasks"
+        ]
+      }
+    },
+    "/projects/{project_id}/tasks/batch": {
+      "put": {
+        "operationId": "batch_update_tasks",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "tasks": [
+                  {
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "progress": 50,
+                    "status": "in_progress"
+                  },
+                  {
+                    "end_date": "2025-11-05T17:00:00Z",
+                    "id": "66666666-6666-6666-6666-666666666666",
+                    "start_date": "2025-11-01T09:00:00Z"
+                  }
+                ]
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TaskBatchUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  [
+                    {
+                      "assignee": null,
+                      "created_at": "2025-10-01T10:00:00Z",
+                      "deleted_at": null,
+                      "due_date": "2025-10-10T10:00:00Z",
+                      "duration_days": 9,
+                      "end_date": "2025-10-10T17:00:00Z",
+                      "id": "22222222-2222-2222-2222-222222222222",
+                      "parent_id": null,
+                      "progress": 0,
+                      "project_id": "00000000-0000-0000-0000-000000000000",
+                      "start_date": "2025-10-01T09:00:00Z",
+                      "status": "pending",
+                      "title": "Define launch checklist",
+                      "updated_at": "2025-10-01T10:00:00Z"
+                    }
+                  ]
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Task"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Tasks updated"
+          }
+        },
+        "tags": [
+          "Tasks"
+        ]
+      }
+    },
+    "/projects/{project_id}/tasks/{id}": {
+      "delete": {
+        "operationId": "delete_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Task soft deleted"
+          }
+        },
+        "tags": [
+          "Tasks"
+        ]
+      },
+      "get": {
+        "operationId": "get_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "assignee": null,
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "due_date": "2025-10-10T10:00:00Z",
+                    "duration_days": 9,
+                    "end_date": "2025-10-10T17:00:00Z",
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "parent_id": null,
+                    "progress": 0,
+                    "project_id": "00000000-0000-0000-0000-000000000000",
+                    "start_date": "2025-10-01T09:00:00Z",
+                    "status": "pending",
+                    "title": "Define launch checklist",
+                    "updated_at": "2025-10-01T10:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            },
+            "description": "Task detail"
+          }
+        },
+        "tags": [
+          "Tasks"
+        ]
+      },
+      "put": {
+        "operationId": "update_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "status": "in_progress"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TaskUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "assignee": null,
+                    "created_at": "2025-10-01T10:00:00Z",
+                    "deleted_at": null,
+                    "due_date": "2025-10-10T10:00:00Z",
+                    "duration_days": 9,
+                    "end_date": "2025-10-10T17:00:00Z",
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "parent_id": null,
+                    "progress": 0,
+                    "project_id": "00000000-0000-0000-0000-000000000000",
+                    "start_date": "2025-10-01T09:00:00Z",
+                    "status": "pending",
+                    "title": "Define launch checklist",
+                    "updated_at": "2025-10-01T10:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            },
+            "description": "Task updated"
+          }
+        },
+        "tags": [
+          "Tasks"
+        ]
+      }
+    },
+    "/projects/{project_id}/tasks/{task_id}/progress": {
+      "get": {
+        "operationId": "list_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-10-05T10:00:00Z",
+                    "deleted_at": null,
+                    "id": "33333333-3333-3333-3333-333333333333",
+                    "note": "Halfway done",
+                    "progress": 50,
+                    "project_id": "00000000-0000-0000-0000-000000000000",
+                    "task_id": "22222222-2222-2222-2222-222222222222",
+                    "updated_at": "2025-10-05T10:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Progress"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List progress entries"
+          }
+        },
+        "tags": [
+          "Progress"
+        ]
+      },
+      "post": {
+        "operationId": "create_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "progress": 10
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ProgressCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-05T10:00:00Z",
+                  "deleted_at": null,
+                  "id": "33333333-3333-3333-3333-333333333333",
+                  "note": "Halfway done",
+                  "progress": 50,
+                  "project_id": "00000000-0000-0000-0000-000000000000",
+                  "task_id": "22222222-2222-2222-2222-222222222222",
+                  "updated_at": "2025-10-05T10:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Progress"
+                }
+              }
+            },
+            "description": "Progress created"
+          }
+        },
+        "tags": [
+          "Progress"
+        ]
+      }
+    },
+    "/projects/{project_id}/tasks/{task_id}/progress/{id}": {
+      "delete": {
+        "operationId": "delete_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Progress id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Progress soft deleted"
+          }
+        },
+        "tags": [
+          "Progress"
+        ]
+      },
+      "get": {
+        "operationId": "get_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Progress id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-05T10:00:00Z",
+                  "deleted_at": null,
+                  "id": "33333333-3333-3333-3333-333333333333",
+                  "note": "Halfway done",
+                  "progress": 50,
+                  "project_id": "00000000-0000-0000-0000-000000000000",
+                  "task_id": "22222222-2222-2222-2222-222222222222",
+                  "updated_at": "2025-10-05T10:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Progress"
+                }
+              }
+            },
+            "description": "Progress detail"
+          }
+        },
+        "tags": [
+          "Progress"
+        ]
+      },
+      "put": {
+        "operationId": "update_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Progress id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "progress": 75
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ProgressUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-10-05T10:00:00Z",
+                  "deleted_at": null,
+                  "id": "33333333-3333-3333-3333-333333333333",
+                  "note": "Halfway done",
+                  "progress": 50,
+                  "project_id": "00000000-0000-0000-0000-000000000000",
+                  "task_id": "22222222-2222-2222-2222-222222222222",
+                  "updated_at": "2025-10-05T10:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Progress"
+                }
+              }
+            },
+            "description": "Progress updated"
+          }
+        },
+        "tags": [
+          "Progress"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "https://localhost:8800"
+    },
+    {
+      "url": "https://rust-service:8800"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Authentication endpoints",
+      "name": "Auth"
+    },
+    {
+      "description": "Project management",
+      "name": "Projects"
+    },
+    {
+      "description": "Task management",
+      "name": "Tasks"
+    },
+    {
+      "description": "Task progress entries",
+      "name": "Progress"
+    }
+  ]
+}

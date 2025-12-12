@@ -31,6 +31,7 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     let project_id = Uuid::new_v4();
     let task1_id = Uuid::new_v4();
     let task2_id = Uuid::new_v4();
+    let task3_id = Uuid::new_v4();
 
     sqlx::query("INSERT INTO users (id, name, email, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'local', datetime('now'), datetime('now'))")
         .bind(user_id).execute(&pool).await?;
@@ -44,6 +45,9 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'T2', 'todo', datetime('now'), datetime('now'))")
         .bind(task2_id).bind(project_id).execute(&pool).await?;
 
+    sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'T3', 'todo', datetime('now'), datetime('now'))")
+        .bind(task3_id).bind(project_id).execute(&pool).await?;
+
     // Setup App
     use s_curve::app::AppState;
     use s_curve::routes::tasks::{create_dependency, list_dependencies, delete_dependency};
@@ -53,7 +57,8 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     use axum::Json as AxJson;
 
     let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
-    let app_state = AppState::new(pool.clone(), jwt);
+    let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
+    let app_state = AppState::new(pool.clone(), jwt, event_bus);
     let auth = AuthUser { user_id };
 
     // 1. Create Dependency T1 -> T2
@@ -71,6 +76,12 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     let path = AxPath(project_id);
     let res = list_dependencies(AxState(app_state.clone()), path, auth.clone()).await?;
     let deps = res.0;
+    // Debug: check raw table count
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies").fetch_one(&pool).await?;
+    println!("raw task_dependencies count = {}", total);
+    let total_project: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies d INNER JOIN tasks t ON t.id = d.source_task_id WHERE t.project_id = ?").bind(project_id).fetch_one(&pool).await?;
+    println!("project task_dependencies count = {}", total_project);
+    // (Removed test diagnostics) The handler uses a CASE-based SELECT to textify UUIDs when needed.
     assert_eq!(deps.len(), 1);
     assert_eq!(deps[0].id, dep_id);
     assert_eq!(deps[0].source_task_id, task1_id);
@@ -85,6 +96,27 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     let path = AxPath(project_id);
     let res = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await;
     assert!(res.is_err()); // Should fail with bad request
+
+    // 3b. Test deeper cycle: create T2 -> T3, then attempt T3 -> T1 when T1->T2 exists
+    // First, recreate T1->T2 (already exists). Create T2->T3
+    let payload = DependencyCreateRequest {
+        source_task_id: task2_id,
+        target_task_id: task3_id,
+        type_: "finish_to_start".to_string(),
+    };
+    let path = AxPath(project_id);
+    let (status, _json) = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await?;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+
+    // Now attempt to create T3 -> T1 which would form a cycle T1->T2->T3->T1
+    let payload = DependencyCreateRequest {
+        source_task_id: task3_id,
+        target_task_id: task1_id,
+        type_: "finish_to_start".to_string(),
+    };
+    let path = AxPath(project_id);
+    let res = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await;
+    assert!(res.is_err()); // Should fail with deep cycle detection
 
     // 4. Try Self Dependency T1 -> T1
     let payload = DependencyCreateRequest {
@@ -104,7 +136,9 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     // 6. Verify Deletion
     let path = AxPath(project_id);
     let res = list_dependencies(AxState(app_state.clone()), path, auth.clone()).await?;
-    assert_eq!(res.0.len(), 0);
+    // One dependency (T2->T3) remains after deleting the original T1->T2
+    assert_eq!(res.0.len(), 1);
+    assert_eq!(res.0[0].source_task_id, task2_id);
 
     // Cleanup
     let _ = std::fs::remove_file(db_path);

@@ -11,9 +11,9 @@ use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::task::{DbTask, Task, TaskCreateRequest, TaskUpdateRequest};
-use crate::models::dependency::{DbTaskDependency, TaskDependency, DependencyCreateRequest};
+use crate::models::dependency::{TaskDependency, DependencyCreateRequest};
 use crate::models::progress::DbProgress;
-use crate::utils::utc_now;
+use crate::utils::{utc_now, normalize_to_midnight};
 
 #[derive(Debug, Deserialize)]
 pub struct TaskListQuery {
@@ -116,6 +116,7 @@ pub async fn list_tasks(
 
     ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
 
+
     // Try simple fast-path query first
     let simple = sqlx::query_as::<_, DbTask>(
         "SELECT t.id, t.project_id, t.title, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, t.assignee, t.parent_id, t.progress, t.created_at, t.updated_at, t.deleted_at
@@ -174,6 +175,7 @@ pub async fn create_task(
     State(state): State<AppState>,
     Path(project_id): Path<Uuid>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<TaskCreateRequest>,
 ) -> AppResult<(StatusCode, Json<Task>)> {
     ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
@@ -182,8 +184,12 @@ pub async fn create_task(
     let now = utc_now();
     let status = payload.status.clone().unwrap_or_else(|| "pending".to_string());
 
+    // Normalize dates to midnight UTC for consistent milestone detection
+    let start_date = payload.start_date.map(normalize_to_midnight);
+    let end_date = payload.end_date.map(normalize_to_midnight);
+
     // Validate timeline fields
-    if let (Some(start), Some(end)) = (payload.start_date, payload.end_date) {
+    if let (Some(start), Some(end)) = (start_date, end_date) {
         if end < start {
             return Err(AppError::bad_request("end_date must be >= start_date"));
         }
@@ -204,8 +210,8 @@ pub async fn create_task(
     .bind(&payload.title)
     .bind(status)
     .bind(payload.due_date)
-    .bind(payload.start_date)
-    .bind(payload.end_date)
+    .bind(start_date)
+    .bind(end_date)
 
     .bind(payload.assignee)
     .bind(payload.parent_id)
@@ -213,13 +219,25 @@ pub async fn create_task(
     .bind(payload.progress.unwrap_or(0))
     .bind(now)
     .bind(now)
+    // ... [existing insert logic]
     .execute(&state.pool)
     .await?;
 
     let task = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
-    let task: Task = task.try_into()?;
+    let task_dto: Task = task.clone().try_into()?;
 
-    Ok((StatusCode::CREATED, Json(task)))
+    // Log activity with request context (no old state for create)
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "created",
+        Some(auth.user_id),
+        &task_dto,
+        None,
+        Some(ctx),
+    );
+
+    Ok((StatusCode::CREATED, Json(task_dto)))
 }
 
 #[utoipa::path(
@@ -233,10 +251,15 @@ pub async fn create_task(
 pub async fn update_task(
     State(state): State<AppState>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Path((project_id, id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<TaskUpdateRequest>,
 ) -> AppResult<Json<Task>> {
-    let mut task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    // Capture old state BEFORE modifications
+    let old_task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let old_dto: Task = old_task.clone().try_into()?;
+
+    let mut task = old_task;
 
     let TaskUpdateRequest {
         title,
@@ -260,10 +283,10 @@ pub async fn update_task(
     }
 
     if let Some(sd) = start_date {
-        task.start_date = Some(sd);
+        task.start_date = Some(normalize_to_midnight(sd));
     }
     if let Some(ed) = end_date {
-        task.end_date = Some(ed);
+        task.end_date = Some(normalize_to_midnight(ed));
     }
     if let Some(a) = assignee {
         task.assignee = Some(a);
@@ -305,9 +328,20 @@ pub async fn update_task(
 
     // Re-fetch to get the DB-calculated fields (like duration_days from triggers)
     let task = fetch_task(&state.pool, auth.user_id, project_id, task.id).await?;
-    let task: Task = task.try_into()?;
+    let task_dto: Task = task.clone().try_into()?;
 
-    Ok(Json(task))
+    // Log activity with old/new tracking and request context
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "updated",
+        Some(auth.user_id),
+        &task_dto,
+        Some(&old_dto),
+        Some(ctx),
+    );
+
+    Ok(Json(task_dto))
 }
 
 #[utoipa::path(
@@ -371,44 +405,28 @@ pub async fn list_dependencies(
 ) -> AppResult<Json<Vec<TaskDependency>>> {
     ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
 
-    let simple = sqlx::query_as::<_, DbTaskDependency>(
-        "SELECT d.id, d.source_task_id, d.target_task_id, d.type, d.created_at \
-         FROM task_dependencies d \
-         INNER JOIN tasks t ON t.id = d.source_task_id \
-         WHERE t.project_id = ? AND t.deleted_at IS NULL",
-    )
-    .bind(project_id)
-    .fetch_all(&state.pool)
-    .await;
+    // Use a defensive manual SELECT that textifies UUIDs and parses rows explicitly.
+    let id_case = uuid_sql::case_uuid("d.id");
+    let source_case = uuid_sql::case_uuid("d.source_task_id");
+    let target_case = uuid_sql::case_uuid("d.target_task_id");
+    let project_match = uuid_sql::match_uuid_clause("t.project_id");
+    let sql = format!(
+        "SELECT {} , {} , {} , d.type, d.created_at FROM task_dependencies d INNER JOIN tasks t ON t.id = d.source_task_id WHERE {} AND t.deleted_at IS NULL",
+        id_case, source_case, target_case, project_match
+    );
 
-    let deps_rows: Vec<DbTaskDependency> = match simple {
-        Ok(rows) => rows,
-        Err(_) => {
-            let id_case = uuid_sql::case_uuid("d.id");
-            let source_case = uuid_sql::case_uuid("d.source_task_id");
-            let target_case = uuid_sql::case_uuid("d.target_task_id");
-            let project_match = uuid_sql::match_uuid_clause("t.project_id");
-            let sql = format!(
-                "SELECT {} , {} , {} , d.type, d.created_at \
-                 FROM task_dependencies d \
-                 INNER JOIN tasks t ON t.id = d.source_task_id \
-                 WHERE {} AND t.deleted_at IS NULL",
-                id_case, source_case, target_case, project_match
-            );
+    let rows = sqlx::query(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
-            let rows = sqlx::query(&sql)
-                .bind(project_id.to_string())
-                .bind(project_id.to_string())
-                .fetch_all(&state.pool)
-                .await?;
+    let mut parsed = Vec::with_capacity(rows.len());
+    for row in rows {
+        parsed.push(row_parsers::db_task_dependency_from_row(&row)?);
+    }
 
-            let mut parsed = Vec::with_capacity(rows.len());
-            for row in rows {
-                parsed.push(row_parsers::db_task_dependency_from_row(&row)?);
-            }
-            parsed
-        }
-    };
+    let deps_rows = parsed;
 
     let deps: Vec<TaskDependency> = deps_rows
         .into_iter()
@@ -454,6 +472,26 @@ pub async fn create_dependency(
 
     if reverse_exists {
         return Err(AppError::bad_request("Cycle detected: reverse dependency already exists"));
+    }
+
+    // Detect deeper cycles (A->B->C->...->A) using a recursive CTE. If there exists
+    // a path from the intended target back to the intended source, inserting this
+    // dependency would create a cycle.
+    let cycle_exists: bool = sqlx::query_scalar(
+        "WITH RECURSIVE reach(node) AS (
+            SELECT target_task_id FROM task_dependencies WHERE source_task_id = ?
+            UNION
+            SELECT d.target_task_id FROM task_dependencies d JOIN reach r ON d.source_task_id = r.node
+        )
+        SELECT EXISTS(SELECT 1 FROM reach WHERE node = ?);"
+    )
+    .bind(payload.target_task_id)
+    .bind(payload.source_task_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    if cycle_exists {
+        return Err(AppError::bad_request("Cycle detected: would create circular dependency"));
     }
 
     let id = Uuid::new_v4();
@@ -554,9 +592,9 @@ pub async fn batch_update_tasks(
         .fetch_one(&mut *tx)
         .await?;
 
-        // Validate timeline if changing
-        let start = update.start_date.or(current.start_date.map(|d| d.with_timezone(&Utc)));
-        let end = update.end_date.or(current.end_date.map(|d| d.with_timezone(&Utc)));
+        // Normalize dates to midnight UTC and validate timeline if changing
+        let start = update.start_date.map(normalize_to_midnight).or(current.start_date.map(|d| d.with_timezone(&Utc)));
+        let end = update.end_date.map(normalize_to_midnight).or(current.end_date.map(|d| d.with_timezone(&Utc)));
 
         if let (Some(s), Some(e)) = (start, end) {
              if e < s {
@@ -573,8 +611,8 @@ pub async fn batch_update_tasks(
         let title = update.title.unwrap_or(current.title);
         let status = update.status.unwrap_or(current.status);
         let due_date = update.due_date.or(current.due_date.map(|d| d.with_timezone(&Utc)));
-        let start_date = update.start_date.or(current.start_date.map(|d| d.with_timezone(&Utc)));
-        let end_date = update.end_date.or(current.end_date.map(|d| d.with_timezone(&Utc)));
+        let start_date = update.start_date.map(normalize_to_midnight).or(current.start_date.map(|d| d.with_timezone(&Utc)));
+        let end_date = update.end_date.map(normalize_to_midnight).or(current.end_date.map(|d| d.with_timezone(&Utc)));
         let assignee = update.assignee.or(current.assignee);
         let parent_id = update.parent_id.or(current.parent_id);
         let progress = update.progress.unwrap_or(current.progress);

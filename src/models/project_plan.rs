@@ -16,6 +16,11 @@ pub struct ProjectPlanPoint {
     pub updated_at: DateTime<Utc>,
 }
 
+impl crate::events::Loggable for ProjectPlanPoint {
+    fn entity_type() -> &'static str { "project_plan" }
+    fn subject_id(&self) -> Uuid { self.id }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct DbProjectPlanPoint {
     pub id: Uuid,

@@ -15,6 +15,11 @@ pub struct TaskDependency {
     pub created_at: DateTime<Utc>,
 }
 
+impl crate::events::Loggable for TaskDependency {
+    fn entity_type() -> &'static str { "dependency" }
+    fn subject_id(&self) -> Uuid { self.id }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct DbTaskDependency {
     pub id: Uuid,

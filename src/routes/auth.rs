@@ -29,6 +29,7 @@ pub struct MessageResponse {
 )]
 pub async fn register(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<RegisterRequest>,
 ) -> AppResult<(StatusCode, Json<AuthResponse>)> {
     ensure_email_available(&state.pool, &payload.email).await?;
@@ -54,6 +55,17 @@ pub async fn register(
     let db_user = fetch_user_by_id(&state.pool, user_id).await?;
     let user: User = db_user.try_into()?;
     let token = state.jwt.encode(user.id)?;
+
+    // Log activity with request context
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "registered",
+        Some(user.id),
+        &user,
+        None,
+        Some(ctx),
+    );
 
     Ok((StatusCode::CREATED, Json(AuthResponse { token, user })))
 }

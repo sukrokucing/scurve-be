@@ -34,3 +34,10 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AppE
 pub fn utc_now() -> DateTime<Utc> {
     Utc::now()
 }
+
+/// Normalize a DateTime to midnight UTC (00:00:00) for consistent date comparisons.
+/// This is used for task start_date and end_date to enable reliable milestone detection
+/// in the frontend (where milestones are detected by comparing timestamps).
+pub fn normalize_to_midnight(dt: DateTime<Utc>) -> DateTime<Utc> {
+    dt.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()
+}

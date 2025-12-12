@@ -18,6 +18,11 @@ pub struct Project {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+impl crate::events::Loggable for Project {
+    fn entity_type() -> &'static str { "project" }
+    fn subject_id(&self) -> Uuid { self.id }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct DbProject {
     pub id: Uuid,

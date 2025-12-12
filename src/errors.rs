@@ -2,6 +2,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Serialize;
+use tracing::error;
 
 pub type AppResult<T> = Result<T, AppError>;
 
@@ -65,10 +66,15 @@ impl AppError {
 struct ErrorResponse {
     error: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        // Log all AppErrors so they are visible in server logs
+        error!(%self, "request failed");
+
         let status = match self {
             AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
@@ -94,9 +100,24 @@ impl IntoResponse for AppError {
             AppError::Internal(_) => "internal",
         };
 
+        // Optionally include debug detail in the JSON response when
+        // SHOW_ERRORS env var is set to `1` or `true`. This is intended
+        // for local debugging only; avoid enabling in production.
+        let show = std::env::var("SHOW_ERRORS").map(|v| {
+            let v = v.to_ascii_lowercase();
+            v == "1" || v == "true" || v == "yes"
+        }).unwrap_or(false);
+
+        let detail = if show {
+            Some(format!("{:?}", self))
+        } else {
+            None
+        };
+
         let payload = ErrorResponse {
             error: error.to_string(),
             message,
+            detail,
         };
 
         (status, Json(payload)).into_response()

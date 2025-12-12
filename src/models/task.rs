@@ -26,6 +26,11 @@ pub struct Task {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+impl crate::events::Loggable for Task {
+    fn entity_type() -> &'static str { "task" }
+    fn subject_id(&self) -> Uuid { self.id }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct DbTask {
     pub id: Uuid,
@@ -67,7 +72,7 @@ impl TryFrom<DbTask> for Task {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct TaskCreateRequest {
     #[schema(example = "Define launch checklist")]
     pub title: String,

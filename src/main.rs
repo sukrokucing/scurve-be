@@ -7,6 +7,7 @@ mod jwt;
 mod models;
 mod routes;
 mod utils;
+mod events;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

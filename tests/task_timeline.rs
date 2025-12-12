@@ -110,7 +110,8 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     use axum::extract::Path as AxPath;
 
     let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
-    let app_state = AppState::new(pool.clone(), jwt);
+    let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
+    let app_state = AppState::new(pool.clone(), jwt, event_bus);
 
     // Create payload
     let payload = TaskCreateRequest {
@@ -127,7 +128,7 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     let path = AxPath(project_id);
     let auth = s_curve::jwt::AuthUser { user_id };
 
-    let (status, json_resp) = create_task(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await?;
+    let (status, json_resp) = create_task(AxState(app_state.clone()), path, auth.clone(), axum::http::HeaderMap::new(), AxJson(payload)).await?;
     assert_eq!(status, axum::http::StatusCode::CREATED);
     let created = json_resp.0;
     assert_eq!(created.title, "Timeline task");
@@ -139,13 +140,13 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     let bad_update = TaskUpdateRequest { title: None, status: None, due_date: None, start_date: Some(chrono::DateTime::parse_from_rfc3339("2025-10-10T00:00:00Z")?.with_timezone(&chrono::Utc)), end_date: Some(chrono::DateTime::parse_from_rfc3339("2025-10-05T00:00:00Z")?.with_timezone(&chrono::Utc)), assignee: None, parent_id: None, progress: None };
 
     let path = AxPath((project_id, created.id));
-    let res = update_task(AxState(app_state.clone()), auth.clone(), path, AxJson(bad_update)).await;
+    let res = update_task(AxState(app_state.clone()), auth.clone(), axum::http::HeaderMap::new(), path, AxJson(bad_update)).await;
     assert!(res.is_err());
 
     // Update with invalid progress
     let bad_progress = TaskUpdateRequest { title: None, status: None, due_date: None, start_date: None, end_date: None, assignee: None, parent_id: None, progress: Some(150) };
     let path = AxPath((project_id, created.id));
-    let res = update_task(AxState(app_state.clone()), auth, path, AxJson(bad_progress)).await;
+    let res = update_task(AxState(app_state.clone()), auth, axum::http::HeaderMap::new(), path, AxJson(bad_progress)).await;
     assert!(res.is_err());
 
     // Valid update to check re-fetch and duration_days
@@ -161,7 +162,7 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     };
     let auth = s_curve::jwt::AuthUser { user_id };
     let path = AxPath((project_id, created.id));
-    let res = update_task(AxState(app_state.clone()), auth.clone(), path, AxJson(valid_update)).await?;
+    let res = update_task(AxState(app_state.clone()), auth.clone(), axum::http::HeaderMap::new(), path, AxJson(valid_update)).await?;
     let updated_task = res.0;
     assert_eq!(updated_task.title, "Updated Title");
     assert_eq!(updated_task.progress, 50);
@@ -183,7 +184,7 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         progress: Some(0),
     };
     let path = AxPath(project_id);
-    let (status, _) = create_task(AxState(app_state.clone()), path, auth.clone(), AxJson(task2_req)).await?;
+    let (status, _) = create_task(AxState(app_state.clone()), path, auth.clone(), axum::http::HeaderMap::new(), AxJson(task2_req)).await?;
     assert_eq!(status, axum::http::StatusCode::CREATED);
 
     // List tasks

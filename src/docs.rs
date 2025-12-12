@@ -32,6 +32,19 @@ use crate::models;
 			,models::project_plan::ProjectPlanPoint
 			,crate::routes::projects::ActualPoint
 			,crate::routes::projects::DashboardResponse
+			,crate::routes::health::HealthResponse
+			,crate::models::rbac::Role
+			,crate::models::rbac::RoleCreateRequest
+			,crate::models::rbac::Permission
+			,crate::models::rbac::PermissionCreateRequest
+			,crate::models::rbac::UserRole
+			,crate::models::rbac::RolePermission
+			,crate::models::rbac::UserPermission
+			,crate::models::rbac::EffectivePermissions
+			,crate::models::rbac::EffectivePermission
+			,crate::models::rbac::AssignRoleRequest
+			,crate::models::rbac::AssignPermissionToRoleRequest
+			,crate::models::rbac::GrantPermissionRequest
 		)
 	),
 	paths(
@@ -48,6 +61,7 @@ use crate::models;
 		crate::routes::projects::update_project_plan,
 		crate::routes::projects::clear_project_plan,
 		crate::routes::projects::get_project_dashboard,
+		crate::routes::projects::get_project_critical_path,
 
 		crate::routes::tasks::list_tasks,
 		crate::routes::tasks::create_task,
@@ -64,12 +78,28 @@ use crate::models;
 		crate::routes::progress::create_progress,
 		crate::routes::progress::update_progress,
 		crate::routes::progress::delete_progress
+		,crate::routes::health::health,
+
+		crate::routes::rbac::list_roles,
+		crate::routes::rbac::create_role,
+		crate::routes::rbac::get_role,
+		crate::routes::rbac::delete_role,
+		crate::routes::rbac::assign_permission_to_role,
+		crate::routes::rbac::list_permissions,
+		crate::routes::rbac::create_permission,
+		crate::routes::rbac::get_user_roles,
+		crate::routes::rbac::assign_role_to_user,
+		crate::routes::rbac::revoke_role_from_user,
+		crate::routes::rbac::get_user_permissions,
+		crate::routes::rbac::grant_permission_to_user,
+		crate::routes::rbac::get_effective_permissions
 	),
 	tags(
 		(name = "Auth", description = "Authentication endpoints"),
 		(name = "Projects", description = "Project management"),
 		(name = "Tasks", description = "Task management"),
-		(name = "Progress", description = "Task progress entries")
+		(name = "Progress", description = "Task progress entries"),
+		(name = "RBAC", description = "Role-Based Access Control")
 	)
 )]
 pub struct ApiDoc;

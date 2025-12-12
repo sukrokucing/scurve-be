@@ -7,28 +7,37 @@ use sqlx::SqlitePool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use crate::events::{self, EventBus};
 use crate::errors::AppError;
 use crate::jwt::JwtConfig;
-use crate::routes::{auth, projects, tasks, progress};
+use crate::routes::{auth, projects, tasks, progress, health, rbac};
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub jwt: Arc<JwtConfig>,
+    pub event_bus: EventBus,
 }
 
 impl AppState {
-    pub fn new(pool: SqlitePool, jwt: JwtConfig) -> Self {
+    pub fn new(pool: SqlitePool, jwt: JwtConfig, event_bus: EventBus) -> Self {
         Self {
             pool,
             jwt: Arc::new(jwt),
+            event_bus,
         }
     }
 }
 
 pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
     let jwt_config = JwtConfig::from_env()?;
-    let state = AppState::new(pool, jwt_config);
+
+    // Initialize Event Bus and Listener
+    let (event_bus, rx) = events::init_event_bus();
+    let listener_pool = pool.clone();
+    tokio::spawn(events::start_activity_listener(rx, listener_pool));
+
+    let state = AppState::new(pool, jwt_config, event_bus);
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
@@ -45,6 +54,7 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
         .route("/", get(projects::list_projects))
         .route("/", post(projects::create_project))
         .route("/:id/dashboard", get(projects::get_project_dashboard))
+        .route("/:id/critical-path", get(projects::get_project_critical_path))
         .route("/:id", get(projects::get_project))
         .route("/:id", put(projects::update_project))
         .route("/:id", delete(projects::delete_project))
@@ -73,6 +83,7 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
         .route("/:id", delete(tasks::delete_dependency));
 
     let router = Router::new()
+        .route("/api/health", get(health::health))
         .nest("/auth", auth_routes)
         .nest("/projects", project_routes)
         // nest tasks under project scope
@@ -81,6 +92,8 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
         .nest("/projects/:project_id/tasks/:task_id/progress", progress_routes)
         // nest dependencies under project scope
         .nest("/projects/:project_id/dependencies", dependency_routes)
+        // RBAC admin routes
+        .nest("/rbac", rbac::routes())
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

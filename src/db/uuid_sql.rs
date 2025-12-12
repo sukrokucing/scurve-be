@@ -1,7 +1,7 @@
 pub fn case_uuid(col: &str) -> String {
     let alias = col.split('.').last().unwrap_or(col);
     format!(
-        "CASE WHEN typeof({c})='blob' THEN lower(substr(hex({c}),1,8) || '-' || substr(hex({c}),9,4) || '-' || substr(hex({c}),13,4) || '-' || substr(hex({c}),17,4) || '-' || substr(hex({c}),21)) ELSE {c} END as {a}",
+        "CASE WHEN typeof({c})='blob' THEN lower(substr(hex({c}),1,8) || '-' || substr(hex({c}),9,4) || '-' || substr(hex({c}),13,4) || '-' || substr(hex({c}),17,4) || '-' || substr(hex({c}),21)) ELSE lower({c}) END as {a}",
         c = col,
         a = alias
     )

@@ -2,6 +2,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use sqlx::SqlitePool;
+use sqlx::Row;
 use uuid::Uuid;
 use crate::db::{uuid_sql, row_parsers};
 
@@ -78,6 +79,7 @@ pub async fn list_projects(State(state): State<AppState>, auth: AuthUser) -> App
 pub async fn create_project(
     State(state): State<AppState>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<ProjectCreateRequest>,
 ) -> AppResult<(StatusCode, Json<Project>)> {
     let now = utc_now();
@@ -99,6 +101,17 @@ pub async fn create_project(
 
     let project = fetch_project(&state.pool, auth.user_id, project_id).await?;
     let project: Project = project.try_into()?;
+
+    // Log activity with request context
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "created",
+        Some(auth.user_id),
+        &project,
+        None,
+        Some(ctx),
+    );
 
     Ok((StatusCode::CREATED, Json(project)))
 }
@@ -131,10 +144,15 @@ pub async fn get_project(
 pub async fn update_project(
     State(state): State<AppState>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
     Json(payload): Json<ProjectUpdateRequest>,
 ) -> AppResult<Json<Project>> {
-    let mut project = fetch_project(&state.pool, auth.user_id, id).await?;
+    // Capture old state before modifications
+    let old_project = fetch_project(&state.pool, auth.user_id, id).await?;
+    let old_dto: Project = old_project.clone().try_into()?;
+
+    let mut project = old_project;
 
     if let Some(name) = payload.name.as_ref() {
         project.name = name.clone();
@@ -163,6 +181,17 @@ pub async fn update_project(
     project.updated_at = now;
     let project: Project = project.try_into()?;
 
+    // Log activity with old/new tracking and request context
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "updated",
+        Some(auth.user_id),
+        &project,
+        Some(&old_dto),
+        Some(ctx),
+    );
+
     Ok(Json(project))
 }
 
@@ -176,10 +205,12 @@ pub async fn update_project(
 pub async fn delete_project(
     State(state): State<AppState>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     // Ensure project exists and belongs to user
-    let _ = fetch_project(&state.pool, auth.user_id, id).await?;
+    let db_project = fetch_project(&state.pool, auth.user_id, id).await?;
+    let project: Project = db_project.clone().try_into()?;
 
     let now = utc_now();
     let affected = sqlx::query("UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
@@ -193,6 +224,17 @@ pub async fn delete_project(
     if affected.rows_affected() == 0 {
         return Err(AppError::not_found("project not found"));
     }
+
+    // Log activity with request context (old state only, no new state for delete)
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "deleted",
+        Some(auth.user_id),
+        &project,
+        None,
+        Some(ctx),
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -322,6 +364,145 @@ pub async fn get_project_dashboard(
     let resp = DashboardResponse { project, plan, actual };
 
     Ok(Json(resp))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CriticalPathResponse {
+    pub task_ids: Vec<Uuid>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{id}/critical-path",
+    tag = "Projects",
+    params(("id" = Uuid, Path, description = "Project id")),
+    responses((status = 200, description = "Critical path task ids", body = CriticalPathResponse))
+)]
+pub async fn get_project_critical_path(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<CriticalPathResponse>> {
+    // ensure project exists and belongs to user
+    let _ = fetch_project(&state.pool, auth.user_id, id).await?;
+
+    // Fetch tasks with computed duration (fallback to 0)
+    let id_case = uuid_sql::case_uuid("t.id");
+    let match_proj = uuid_sql::match_uuid_clause("t.project_id");
+    let sql_tasks = format!(
+        "SELECT {} , COALESCE(t.duration_days, CAST(julianday(t.end_date) - julianday(t.start_date) AS INTEGER), 0) as duration_days FROM tasks t WHERE {} AND t.deleted_at IS NULL",
+        id_case, match_proj
+    );
+
+    let task_rows = sqlx::query(&sql_tasks)
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
+
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    let mut durations: HashMap<Uuid, i32> = HashMap::new();
+    let mut nodes: HashSet<Uuid> = HashSet::new();
+    for row in task_rows.iter() {
+        let id_s: String = row.try_get("id").map_err(|e| AppError::internal(format!("missing id: {}", e)))?;
+        let dur: i64 = row.try_get("duration_days").map_err(|e| AppError::internal(format!("missing duration_days: {}", e)))?;
+        let tu = Uuid::parse_str(&id_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+        durations.insert(tu, dur as i32);
+        nodes.insert(tu);
+    }
+
+    // Fetch dependencies (edges source -> target)
+    let id_case_s = uuid_sql::case_uuid("d.source_task_id");
+    let id_case_t = uuid_sql::case_uuid("d.target_task_id");
+    let project_match = uuid_sql::match_uuid_clause("t.project_id");
+    let sql_deps = format!(
+        "SELECT {} , {} FROM task_dependencies d INNER JOIN tasks t ON t.id = d.source_task_id WHERE {} AND t.deleted_at IS NULL",
+        id_case_s, id_case_t, project_match
+    );
+
+    let dep_rows = sqlx::query(&sql_deps)
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
+
+    let mut adj: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    let mut indeg: HashMap<Uuid, usize> = HashMap::new();
+    for n in nodes.iter() {
+        indeg.insert(*n, 0);
+    }
+
+    for row in dep_rows.iter() {
+        let src_s: String = row.try_get("source_task_id").map_err(|e| AppError::internal(format!("missing source_task_id: {}", e)))?;
+        let tgt_s: String = row.try_get("target_task_id").map_err(|e| AppError::internal(format!("missing target_task_id: {}", e)))?;
+        let src = Uuid::parse_str(&src_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+        let tgt = Uuid::parse_str(&tgt_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+        if !nodes.contains(&src) || !nodes.contains(&tgt) { continue; }
+        adj.entry(src).or_default().push(tgt);
+        *indeg.entry(tgt).or_default() += 1;
+    }
+
+    // Kahn's algorithm for topological order
+    let mut q: VecDeque<Uuid> = VecDeque::new();
+    for (&n, &d) in indeg.iter() {
+        if d == 0 {
+            q.push_back(n);
+        }
+    }
+
+    let mut topo: Vec<Uuid> = Vec::new();
+    while let Some(n) = q.pop_front() {
+        topo.push(n);
+        if let Some(neis) = adj.get(&n) {
+            for &m in neis {
+                if let Some(e) = indeg.get_mut(&m) { *e -= 1; if *e == 0 { q.push_back(m); } }
+            }
+        }
+    }
+
+    if topo.len() != nodes.len() {
+        return Err(AppError::internal("dependency graph is not a DAG".to_string()));
+    }
+
+    // DP for longest path (by duration). Initialize best[node] = duration[node]
+    let mut best: HashMap<Uuid, i64> = HashMap::new();
+    let mut prev: HashMap<Uuid, Option<Uuid>> = HashMap::new();
+    for &n in topo.iter() { best.insert(n, durations.get(&n).cloned().unwrap_or(0) as i64); prev.insert(n, None); }
+
+    for &u in topo.iter() {
+        let bu = *best.get(&u).unwrap_or(&0);
+        if let Some(neis) = adj.get(&u) {
+            for &v in neis {
+                let cand = bu + durations.get(&v).cloned().unwrap_or(0) as i64;
+                if cand > *best.get(&v).unwrap_or(&0) {
+                    best.insert(v, cand);
+                    prev.insert(v, Some(u));
+                }
+            }
+        }
+    }
+
+    // Find node with max best value
+    let mut max_node: Option<Uuid> = None;
+    let mut max_val: i64 = -1;
+    for (&n, &val) in best.iter() {
+        if val > max_val { max_val = val; max_node = Some(n); }
+    }
+
+    let mut path: Vec<Uuid> = Vec::new();
+    if let Some(mut cur) = max_node {
+        while let Some(p) = prev.get(&cur).and_then(|o| *o) {
+            path.push(cur);
+            cur = p;
+        }
+        path.push(cur);
+        path.reverse();
+    }
+
+    Ok(Json(CriticalPathResponse { task_ids: path }))
 }
 
 #[utoipa::path(
