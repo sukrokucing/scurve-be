@@ -32,6 +32,7 @@ use crate::models;
 			,models::project_plan::ProjectPlanPoint
 			,crate::routes::projects::ActualPoint
 			,crate::routes::projects::DashboardResponse
+			,crate::routes::projects::CriticalPathResponse
 			,crate::routes::health::HealthResponse
 			,crate::models::rbac::Role
 			,crate::models::rbac::RoleCreateRequest
@@ -84,7 +85,9 @@ use crate::models;
 		crate::routes::rbac::create_role,
 		crate::routes::rbac::get_role,
 		crate::routes::rbac::delete_role,
+		crate::routes::rbac::get_role_permissions,
 		crate::routes::rbac::assign_permission_to_role,
+        crate::routes::rbac::delete_permission_from_role,
 		crate::routes::rbac::list_permissions,
 		crate::routes::rbac::create_permission,
 		crate::routes::rbac::get_user_roles,

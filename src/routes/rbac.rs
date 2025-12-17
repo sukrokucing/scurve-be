@@ -6,7 +6,7 @@
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, post, delete},
+    routing::{get, delete},
     Json, Router,
 };
 use chrono::Utc;
@@ -27,18 +27,23 @@ use crate::models::rbac::*;
 pub fn routes() -> Router<AppState> {
     Router::new()
         // Roles
+        // Roles
         .route("/roles", get(list_roles).post(create_role))
-        .route("/roles/{role_id}", get(get_role).delete(delete_role))
-        .route("/roles/{role_id}/permissions", post(assign_permission_to_role))
+        .route("/roles/:role_id", get(get_role).delete(delete_role))
+        .route("/roles/:role_id/permissions", get(get_role_permissions).post(assign_permission_to_role))
+        .route(
+            "/roles/:role_id/permissions/:permission_id",
+            delete(delete_permission_from_role),
+        )
         // Permissions
         .route("/permissions", get(list_permissions).post(create_permission))
         // User role assignments
-        .route("/users/{user_id}/roles", get(get_user_roles).post(assign_role_to_user))
-        .route("/users/{user_id}/roles/{role_id}", delete(revoke_role_from_user))
+        .route("/users/:user_id/roles", get(get_user_roles).post(assign_role_to_user))
+        .route("/users/:user_id/roles/:role_id", delete(revoke_role_from_user))
         // User direct permissions
-        .route("/users/{user_id}/permissions", get(get_user_permissions).post(grant_permission_to_user))
+        .route("/users/:user_id/permissions", get(get_user_permissions).post(grant_permission_to_user))
         // Effective permissions (computed)
-        .route("/users/{user_id}/effective-permissions", get(get_effective_permissions))
+        .route("/users/:user_id/effective-permissions", get(get_effective_permissions))
 }
 
 // =============================================================================
@@ -268,6 +273,94 @@ async fn assign_permission_to_role(
     );
 
     Ok(StatusCode::CREATED)
+}
+
+/// Get permissions assigned to a role
+#[utoipa::path(
+    get,
+    path = "/rbac/roles/{role_id}/permissions",
+    tag = "RBAC",
+    params(
+        ("role_id" = Uuid, Path, description = "Role ID"),
+    ),
+    responses(
+        (status = 200, description = "List of assigned permissions", body = Vec<Permission>),
+    ),
+    security(("bearerAuth" = []))
+)]
+async fn get_role_permissions(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(role_id): Path<Uuid>,
+) -> Result<Json<Vec<Permission>>, AppError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT p.id, p.name, p.description, p.created_at, p.updated_at
+        FROM permissions p
+        INNER JOIN role_permissions rp ON p.id = rp.permission_id
+        WHERE rp.role_id = ?
+        ORDER BY p.name
+        "#
+    )
+    .bind(role_id.to_string())
+    .fetch_all(&state.pool)
+    .await?;
+
+    let permissions: Vec<Permission> = rows.iter().map(|r| Permission {
+        id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
+        name: r.get("name"),
+        description: r.get("description"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+    }).collect();
+
+    Ok(Json(permissions))
+}
+
+/// Remove a permission from a role
+#[utoipa::path(
+    delete,
+    path = "/rbac/roles/{role_id}/permissions/{permission_id}",
+    tag = "RBAC",
+    params(
+        ("role_id" = Uuid, Path, description = "Role ID"),
+        ("permission_id" = Uuid, Path, description = "Permission ID"),
+    ),
+    responses(
+        (status = 204, description = "Permission removed from role"),
+    ),
+    security(("bearerAuth" = []))
+)]
+async fn delete_permission_from_role(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    headers: HeaderMap,
+    Path((role_id, permission_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let now = Utc::now();
+
+    sqlx::query("DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?")
+        .bind(role_id.to_string())
+        .bind(permission_id.to_string())
+        .execute(&state.pool)
+        .await?;
+
+    let assignment = RolePermission {
+        role_id,
+        permission_id,
+        created_at: now,
+    };
+
+    log_activity_with_context(
+        &state.event_bus,
+        "revoked",
+        Some(auth.user_id),
+        &assignment,
+        None,
+        Some(RequestContext::from_headers(&headers)),
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // =============================================================================
