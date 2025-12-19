@@ -41,10 +41,11 @@ impl DefaultPolicyEvaluator {
         if let Some(scope_project) = scope_obj.get("project_id").and_then(|v| v.as_str()) {
             if let Some(ctx_project) = &ctx.project_id {
                 if scope_project != ctx_project.to_string() {
+                    tracing::debug!(scope_project, ctx_project = %ctx_project, "project_id mismatch");
                     return false;
                 }
             } else {
-                // Scope specifies project but context doesn't have one
+                tracing::debug!(scope_project, "context missing project_id");
                 return false;
             }
         }
@@ -53,9 +54,11 @@ impl DefaultPolicyEvaluator {
         if let Some(scope_rt) = scope_obj.get("resource_type").and_then(|v| v.as_str()) {
             if let Some(ctx_rt) = &ctx.resource_type {
                 if scope_rt != ctx_rt {
+                    tracing::debug!(scope_rt, ctx_rt, "resource_type mismatch");
                     return false;
                 }
             } else {
+                tracing::debug!(scope_rt, "context missing resource_type");
                 return false;
             }
         }
@@ -63,13 +66,16 @@ impl DefaultPolicyEvaluator {
         if let Some(scope_rid) = scope_obj.get("resource_id").and_then(|v| v.as_str()) {
             if let Some(ctx_rid) = &ctx.resource_id {
                 if scope_rid != ctx_rid.to_string() {
+                    tracing::debug!(scope_rid, ctx_rid = %ctx_rid, "resource_id mismatch");
                     return false;
                 }
             } else {
+                tracing::debug!(scope_rid, "context missing resource_id");
                 return false;
             }
         }
 
+        tracing::debug!(?scope, ?ctx, "scope matched");
         true
     }
 }

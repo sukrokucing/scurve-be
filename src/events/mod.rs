@@ -194,8 +194,9 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
             .unwrap_or("important");
 
         // We store actor_id and subject_id as proper UUIDs if they parse, otherwise NULL
-        let actor_id = actor_id_str.and_then(|s| Uuid::parse_str(s).ok());
-        let subject_id = subject_id_str.and_then(|s| Uuid::parse_str(s).ok());
+        // Converting to String for SQLite TEXT compatibility
+        let actor_id = actor_id_str.and_then(|s| Uuid::parse_str(s).ok()).map(|u| u.to_string());
+        let subject_id = subject_id_str.and_then(|s| Uuid::parse_str(s).ok()).map(|u| u.to_string());
 
         // Ensure we have a valid timestamp, or default to now
         let occurred_at = occurred_at_str
@@ -203,23 +204,23 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
 
-        let id = Uuid::new_v4();
+        let id = Uuid::new_v4().to_string();
 
         // Phase 3: Insert into activity_log (projection)
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             INSERT INTO activity_log (id, event_name, description, actor_id, subject_id, occurred_at, properties, severity)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-            id,
-            name,
-            description,
-            actor_id,
-            subject_id,
-            occurred_at,
-            event_json,
-            severity
+            "#
         )
+        .bind(&id)
+        .bind(name)
+        .bind(description)
+        .bind(&actor_id)
+        .bind(&subject_id)
+        .bind(occurred_at)
+        .bind(&event_json)
+        .bind(severity)
         .execute(&pool)
         .await;
 

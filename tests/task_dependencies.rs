@@ -34,19 +34,19 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     let task3_id = Uuid::new_v4();
 
     sqlx::query("INSERT INTO users (id, name, email, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'local', datetime('now'), datetime('now'))")
-        .bind(user_id).execute(&pool).await?;
+        .bind(user_id.to_string()).execute(&pool).await?;
 
     sqlx::query("INSERT INTO projects (id, user_id, name, theme_color, created_at, updated_at) VALUES (?, ?, 'P', '#000', datetime('now'), datetime('now'))")
-        .bind(project_id).bind(user_id).execute(&pool).await?;
+        .bind(project_id.to_string()).bind(user_id.to_string()).execute(&pool).await?;
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'T1', 'todo', datetime('now'), datetime('now'))")
-        .bind(task1_id).bind(project_id).execute(&pool).await?;
+        .bind(task1_id.to_string()).bind(project_id.to_string()).execute(&pool).await?;
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'T2', 'todo', datetime('now'), datetime('now'))")
-        .bind(task2_id).bind(project_id).execute(&pool).await?;
+        .bind(task2_id.to_string()).bind(project_id.to_string()).execute(&pool).await?;
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'T3', 'todo', datetime('now'), datetime('now'))")
-        .bind(task3_id).bind(project_id).execute(&pool).await?;
+        .bind(task3_id.to_string()).bind(project_id.to_string()).execute(&pool).await?;
 
     // Setup App
     use s_curve::app::AppState;
@@ -79,7 +79,7 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     // Debug: check raw table count
     let total: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies").fetch_one(&pool).await?;
     println!("raw task_dependencies count = {}", total);
-    let total_project: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies d INNER JOIN tasks t ON t.id = d.source_task_id WHERE t.project_id = ?").bind(project_id).fetch_one(&pool).await?;
+    let total_project: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies d INNER JOIN tasks t ON t.id = d.source_task_id WHERE t.project_id = ?").bind(project_id.to_string()).fetch_one(&pool).await?;
     println!("project task_dependencies count = {}", total_project);
     // (Removed test diagnostics) The handler uses a CASE-based SELECT to textify UUIDs when needed.
     assert_eq!(deps.len(), 1);

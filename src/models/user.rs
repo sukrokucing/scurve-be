@@ -53,7 +53,7 @@ impl TryFrom<DbUser> for User {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct RegisterRequest {
     #[schema(example = "Ada Lovelace")]
     pub name: String,
@@ -71,7 +71,7 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct AuthResponse {
     pub token: String,
     pub user: User,

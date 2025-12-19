@@ -20,7 +20,7 @@ async fn test_batch_update_tasks(pool: SqlitePool) {
     let now = chrono::Utc::now();
 
     sqlx::query("INSERT INTO users (id, name, email, password_hash, provider, created_at, updated_at) VALUES (?, 'Test User', 'test@example.com', 'hash', 'local', ?, ?)")
-        .bind(user_id)
+        .bind(user_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)
@@ -28,8 +28,8 @@ async fn test_batch_update_tasks(pool: SqlitePool) {
         .unwrap();
 
     sqlx::query("INSERT INTO projects (id, user_id, name, theme_color, created_at, updated_at) VALUES (?, ?, 'Test Project', '#000000', ?, ?)")
-        .bind(project_id)
-        .bind(user_id)
+        .bind(project_id.to_string())
+        .bind(user_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)
@@ -47,8 +47,8 @@ async fn test_batch_update_tasks(pool: SqlitePool) {
     let task2_id = Uuid::new_v4();
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'Task 1', 'todo', ?, ?)")
-        .bind(task1_id)
-        .bind(project_id)
+        .bind(task1_id.to_string())
+        .bind(project_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)
@@ -56,8 +56,8 @@ async fn test_batch_update_tasks(pool: SqlitePool) {
         .unwrap();
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'Task 2', 'todo', ?, ?)")
-        .bind(task2_id)
-        .bind(project_id)
+        .bind(task2_id.to_string())
+        .bind(project_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)
@@ -112,8 +112,8 @@ async fn test_batch_update_tasks(pool: SqlitePool) {
     // Task 3 is valid, Task 999 is missing
     let task3_id = Uuid::new_v4();
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'Task 3', 'todo', ?, ?)")
-        .bind(task3_id)
-        .bind(project_id)
+        .bind(task3_id.to_string())
+        .bind(project_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)
@@ -152,7 +152,7 @@ async fn test_batch_update_tasks(pool: SqlitePool) {
 
     // Verify Task 3 was NOT updated (rollback)
     let task3_status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = ?")
-        .bind(task3_id)
+        .bind(task3_id.to_string())
         .fetch_one(&pool)
         .await
         .unwrap();

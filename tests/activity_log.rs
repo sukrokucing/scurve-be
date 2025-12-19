@@ -9,7 +9,6 @@ use sqlx::SqlitePool;
 use tower::ServiceExt; // for `oneshot`
 use tempfile::tempdir;
 use chrono::Utc;
-use uuid::Uuid;
 
 use s_curve::create_app;
 use s_curve::models::task::TaskCreateRequest;
@@ -42,11 +41,17 @@ async fn test_activity_log_flow() -> Result<()> {
         "password": "password123"
     });
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri("/auth/register")
         .header("content-type", "application/json")
         .body(Body::from(register_body.to_string()))?;
+
+    // Inject ConnectInfo for rate limiting
+    use axum::extract::ConnectInfo;
+    use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await?;
@@ -60,12 +65,14 @@ async fn test_activity_log_flow() -> Result<()> {
         "theme_color": "#000000"
     });
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri("/projects")
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(project_body.to_string()))?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await?;
@@ -84,12 +91,14 @@ async fn test_activity_log_flow() -> Result<()> {
         progress: None,
     };
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri(format!("/projects/{}/tasks", project_id))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(serde_json::to_string(&task_payload)?))?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::CREATED);

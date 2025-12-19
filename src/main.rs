@@ -8,9 +8,14 @@ mod models;
 mod routes;
 mod utils;
 mod events;
+mod authz;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     load_env();
     init_tracing();
 
@@ -35,13 +40,13 @@ async fn main() -> anyhow::Result<()> {
         let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
         // Rustls+ALPN will negotiate HTTP/2 with clients (browsers) automatically.
         axum_server::bind_rustls(addr, cfg)
-            .serve(router.into_make_service())
+            .serve(router.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await?;
     } else {
         tracing::info!("starting plaintext HTTP (no CERT_PATH/KEY_PATH provided)");
         // plaintext (no TLS)
         let listener = tokio::net::TcpListener::bind(addr).await?;
-        axum::serve(listener, router.into_make_service()).await?;
+        axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
     }
 
     Ok(())

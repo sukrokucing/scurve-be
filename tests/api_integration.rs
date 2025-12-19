@@ -39,11 +39,17 @@ async fn full_api_flow() -> Result<()> {
         "password": "password123"
     });
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri("/auth/register")
         .header("content-type", "application/json")
         .body(Body::from(register_body.to_string()))?;
+
+    // Inject ConnectInfo for rate limiting
+    use axum::extract::ConnectInfo;
+    use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -65,12 +71,14 @@ async fn full_api_flow() -> Result<()> {
         "theme_color": "#000000"
     });
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri("/projects")
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(project_body.to_string()))?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -87,12 +95,14 @@ async fn full_api_flow() -> Result<()> {
         "status": "pending"
     });
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri(format!("/projects/{}/tasks", project_id))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(task_body.to_string()))?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -109,12 +119,14 @@ async fn full_api_flow() -> Result<()> {
         "note": "Halfway"
     });
 
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("POST")
         .uri(format!("/projects/{}/tasks/{}/progress", project_id, task_id))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(prog_body.to_string()))?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -126,11 +138,13 @@ async fn full_api_flow() -> Result<()> {
     let prog_id = prog_res.get("id").and_then(|v| v.as_str()).context("missing progress id")?.to_string();
 
     // -- list progress
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("GET")
         .uri(format!("/projects/{}/tasks/{}/progress", project_id, task_id))
         .header("authorization", format!("Bearer {}", token))
         .body(Body::empty())?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -144,12 +158,14 @@ async fn full_api_flow() -> Result<()> {
 
     // -- update progress
     let update_body = json!({"progress": 80});
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("PUT")
         .uri(format!("/projects/{}/tasks/{}/progress/{}", project_id, task_id, prog_id))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(update_body.to_string()))?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -159,11 +175,13 @@ async fn full_api_flow() -> Result<()> {
     }
 
     // -- delete progress
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("DELETE")
         .uri(format!("/projects/{}/tasks/{}/progress/{}", project_id, task_id, prog_id))
         .header("authorization", format!("Bearer {}", token))
         .body(Body::empty())?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();
@@ -173,11 +191,13 @@ async fn full_api_flow() -> Result<()> {
     }
 
     // -- list again should not include deleted
-    let req = Request::builder()
+    let mut req = Request::builder()
         .method("GET")
         .uri(format!("/projects/{}/tasks/{}/progress", project_id, task_id))
         .header("authorization", format!("Bearer {}", token))
         .body(Body::empty())?;
+
+    req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let status = resp.status();

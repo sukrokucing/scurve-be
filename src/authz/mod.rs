@@ -8,7 +8,9 @@
 
 mod evaluator;
 mod principal;
+pub mod layer;
 
+// Re-export common items
 pub use evaluator::{DefaultPolicyEvaluator, PolicyEvaluator};
 pub use principal::{Principal, ResourceContext};
 
@@ -39,6 +41,7 @@ impl AuthzMode {
 }
 
 /// Well-known role names
+#[allow(dead_code)]
 pub mod roles {
     pub const SUPER_ADMIN: &str = "super_admin";
     pub const ADMIN: &str = "admin";
@@ -67,6 +70,7 @@ pub mod permissions {
 
     // User
     pub const USER_VIEW: &str = "user.view";
+    #[allow(dead_code)]
     pub const USER_MANAGE: &str = "user.manage";
 
     // RBAC

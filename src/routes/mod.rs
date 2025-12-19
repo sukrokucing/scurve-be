@@ -4,3 +4,4 @@ pub mod tasks;
 pub mod progress;
 pub mod health;
 pub mod rbac;
+pub mod users;

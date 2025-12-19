@@ -52,7 +52,7 @@ impl TryFrom<DbProject> for Project {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct ProjectCreateRequest {
     #[schema(example = "Launch Planning")]
     pub name: String,

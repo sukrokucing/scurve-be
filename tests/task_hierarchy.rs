@@ -20,7 +20,7 @@ async fn test_task_hierarchy(pool: SqlitePool) {
     let now = chrono::Utc::now();
 
     sqlx::query("INSERT INTO users (id, name, email, password_hash, provider, created_at, updated_at) VALUES (?, 'Test User', 'test@example.com', 'hash', 'local', ?, ?)")
-        .bind(user_id)
+        .bind(user_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)
@@ -28,8 +28,8 @@ async fn test_task_hierarchy(pool: SqlitePool) {
         .unwrap();
 
     sqlx::query("INSERT INTO projects (id, user_id, name, theme_color, created_at, updated_at) VALUES (?, ?, 'Test Project', '#000000', ?, ?)")
-        .bind(project_id)
-        .bind(user_id)
+        .bind(project_id.to_string())
+        .bind(user_id.to_string())
         .bind(now)
         .bind(now)
         .execute(&pool)

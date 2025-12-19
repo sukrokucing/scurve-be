@@ -70,12 +70,13 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let _project_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
 
     // fetch the project id from the DB (avoid relying on JSON id format mismatch)
-    let project_uuid: uuid::Uuid = sqlx::query_scalar(
+    let project_id_str: String = sqlx::query_scalar(
         "SELECT id FROM projects WHERE user_id = (SELECT id FROM users WHERE email = ?) ORDER BY created_at DESC LIMIT 1",
     )
     .bind("dash_user@example.com")
     .fetch_one(&pool)
     .await?;
+    let project_uuid = Uuid::parse_str(&project_id_str).context("failed to parse project uuid")?;
     let project_id = project_uuid.to_string();
 
     // create a task via API
@@ -105,8 +106,8 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let pp2_uuid = Uuid::new_v4();
 
     sqlx::query("INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(pp1_uuid)
-        .bind(project_uuid)
+        .bind(pp1_uuid.to_string())
+        .bind(project_uuid.to_string())
         .bind(&p1_date)
         .bind(10i32)
         .bind(now.to_rfc3339())
@@ -115,8 +116,8 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
         .await?;
 
     sqlx::query("INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(pp2_uuid)
-        .bind(project_uuid)
+        .bind(pp2_uuid.to_string())
+        .bind(project_uuid.to_string())
         .bind(&p2_date)
         .bind(50i32)
         .bind(now.to_rfc3339())

@@ -35,28 +35,28 @@ async fn test_critical_path_basic() -> anyhow::Result<()> {
     let d = Uuid::new_v4();
 
     sqlx::query("INSERT INTO users (id, name, email, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'local', datetime('now'), datetime('now'))")
-        .bind(user_id).execute(&pool).await?;
+        .bind(user_id.to_string()).execute(&pool).await?;
 
     sqlx::query("INSERT INTO projects (id, user_id, name, theme_color, created_at, updated_at) VALUES (?, ?, 'P', '#000', datetime('now'), datetime('now'))")
-        .bind(project_id).bind(user_id).execute(&pool).await?;
+        .bind(project_id.to_string()).bind(user_id.to_string()).execute(&pool).await?;
 
     // Tasks with explicit durations (days)
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, duration_days, created_at, updated_at) VALUES (?, ?, 'A', 'todo', ?, datetime('now'), datetime('now'))")
-        .bind(a).bind(project_id).bind(2i64).execute(&pool).await?;
+        .bind(a.to_string()).bind(project_id.to_string()).bind(2i64).execute(&pool).await?;
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, duration_days, created_at, updated_at) VALUES (?, ?, 'B', 'todo', ?, datetime('now'), datetime('now'))")
-        .bind(b).bind(project_id).bind(3i64).execute(&pool).await?;
+        .bind(b.to_string()).bind(project_id.to_string()).bind(3i64).execute(&pool).await?;
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, duration_days, created_at, updated_at) VALUES (?, ?, 'C', 'todo', ?, datetime('now'), datetime('now'))")
-        .bind(c).bind(project_id).bind(5i64).execute(&pool).await?;
+        .bind(c.to_string()).bind(project_id.to_string()).bind(5i64).execute(&pool).await?;
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, duration_days, created_at, updated_at) VALUES (?, ?, 'D', 'todo', ?, datetime('now'), datetime('now'))")
-        .bind(d).bind(project_id).bind(1i64).execute(&pool).await?;
+        .bind(d.to_string()).bind(project_id.to_string()).bind(1i64).execute(&pool).await?;
 
     // Dependencies: A->B, B->C, A->D
     sqlx::query("INSERT INTO task_dependencies (id, source_task_id, target_task_id, created_at) VALUES (?, ?, ?, datetime('now'))")
-        .bind(Uuid::new_v4()).bind(a).bind(b).execute(&pool).await?;
+        .bind(Uuid::new_v4().to_string()).bind(a.to_string()).bind(b.to_string()).execute(&pool).await?;
     sqlx::query("INSERT INTO task_dependencies (id, source_task_id, target_task_id, created_at) VALUES (?, ?, ?, datetime('now'))")
-        .bind(Uuid::new_v4()).bind(b).bind(c).execute(&pool).await?;
+        .bind(Uuid::new_v4().to_string()).bind(b.to_string()).bind(c.to_string()).execute(&pool).await?;
     sqlx::query("INSERT INTO task_dependencies (id, source_task_id, target_task_id, created_at) VALUES (?, ?, ?, datetime('now'))")
-        .bind(Uuid::new_v4()).bind(a).bind(d).execute(&pool).await?;
+        .bind(Uuid::new_v4().to_string()).bind(a.to_string()).bind(d.to_string()).execute(&pool).await?;
 
     // Setup App
     use s_curve::app::AppState;

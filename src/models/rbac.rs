@@ -104,7 +104,7 @@ impl From<DbPermission> for Permission {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct PermissionCreateRequest {
     #[schema(example = "project.archive")]
     pub name: String,
@@ -129,7 +129,7 @@ impl Loggable for UserRole {
     fn severity(&self) -> Severity { Severity::Critical }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct AssignRoleRequest {
     pub role_id: Uuid,
 }
@@ -156,7 +156,7 @@ impl Loggable for UserPermission {
     fn severity(&self) -> Severity { Severity::Critical }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct GrantPermissionRequest {
     pub permission_id: Uuid,
     /// Optional scope JSON, e.g. {"project_id": "..."}
@@ -182,7 +182,7 @@ impl Loggable for RolePermission {
     fn severity(&self) -> Severity { Severity::Critical }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct AssignPermissionToRoleRequest {
     pub permission_id: Uuid,
 }

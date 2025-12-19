@@ -90,13 +90,13 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     let project_id = Uuid::new_v4();
 
     sqlx::query("INSERT INTO users (id, name, email, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'local', datetime('now'), datetime('now'))")
-        .bind(user_id)
+        .bind(user_id.to_string())
         .execute(&pool)
         .await?;
 
     sqlx::query("INSERT INTO projects (id, user_id, name, theme_color, created_at, updated_at) VALUES (?, ?, 'P', '#000', datetime('now'), datetime('now'))")
-        .bind(project_id)
-        .bind(user_id)
+        .bind(project_id.to_string())
+        .bind(user_id.to_string())
         .execute(&pool)
         .await?;
 

@@ -66,8 +66,8 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
     let user_uuid = uuid::Uuid::parse_str(&user_id)?;
     let now = chrono::Utc::now();
     sqlx::query("INSERT INTO projects (id, user_id, name, description, theme_color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(project_uuid)
-        .bind(user_uuid)
+        .bind(project_uuid.to_string())
+        .bind(user_uuid.to_string())
         .bind("Seeded Project")
         .bind("project seeded by test")
         .bind("#112233")
@@ -78,8 +78,8 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
 
     // insert task
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(task_uuid)
-        .bind(project_uuid)
+        .bind(task_uuid.to_string())
+        .bind(project_uuid.to_string())
         .bind("Seeded Task")
         .bind("pending")
         .bind(now)
@@ -89,9 +89,9 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
 
     // insert two progress rows
     sqlx::query("INSERT INTO task_progress (id, task_id, project_id, progress, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(prog1_uuid)
-        .bind(task_uuid)
-        .bind(project_uuid)
+        .bind(prog1_uuid.to_string())
+        .bind(task_uuid.to_string())
+        .bind(project_uuid.to_string())
         .bind(5_i64)
         .bind("seeded p1")
         .bind(now)
@@ -100,9 +100,9 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
         .await?;
 
     sqlx::query("INSERT INTO task_progress (id, task_id, project_id, progress, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(prog2_uuid)
-        .bind(task_uuid)
-        .bind(project_uuid)
+        .bind(prog2_uuid.to_string())
+        .bind(task_uuid.to_string())
+        .bind(project_uuid.to_string())
         .bind(75_i64)
         .bind("seeded p2")
         .bind(now)
