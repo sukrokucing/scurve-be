@@ -10,7 +10,7 @@ use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::project::{DbProject, Project, ProjectCreateRequest, ProjectUpdateRequest};
-use crate::models::project_plan::{DbProjectPlanPoint, ProjectPlanPoint};
+use crate::models::project_plan::ProjectPlanPoint;
 use serde::Serialize;
 use utoipa::ToSchema;
 use crate::utils::utc_now;
@@ -73,10 +73,16 @@ pub async fn create_project(
     let project_id = Uuid::new_v4();
     let theme_color = payload.theme_color.clone().unwrap_or_else(|| DEFAULT_THEME.to_string());
 
-    sqlx::query(
-        "INSERT INTO projects (id, user_id, name, description, theme_color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+    let match_user_id = uuid_sql::match_uuid_clause("id");
+    let insert_sql = format!(
+        "INSERT INTO projects (id, user_id, name, description, theme_color, created_at, updated_at) \
+         VALUES (?, (SELECT id FROM users WHERE {}), ?, ?, ?, ?, ?)",
+        match_user_id
+    );
+
+    sqlx::query(&insert_sql)
     .bind(project_id.to_string())
+    .bind(auth.user_id.to_string())
     .bind(auth.user_id.to_string())
     .bind(&payload.name)
     .bind(&payload.description)
@@ -245,20 +251,23 @@ pub async fn delete_project(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn fetch_project(pool: &SqlitePool, _user_id: Uuid, project_id: Uuid) -> AppResult<DbProject> {
+async fn fetch_project(pool: &SqlitePool, user_id: Uuid, project_id: Uuid) -> AppResult<DbProject> {
     // Always use the fallback path that handles TEXT UUID storage correctly
     let id_case = uuid_sql::case_uuid("id");
     let user_case = uuid_sql::case_uuid("user_id");
     let match_id = uuid_sql::match_uuid_clause("id");
+    let match_user = uuid_sql::match_uuid_clause("user_id");
 
     let sql = format!(
-        "SELECT {} , {} , name, description, theme_color, created_at, updated_at, deleted_at FROM projects WHERE {} AND deleted_at IS NULL",
-        id_case, user_case, match_id
+        "SELECT {} , {} , name, description, theme_color, created_at, updated_at, deleted_at FROM projects WHERE {} AND {} AND deleted_at IS NULL",
+        id_case, user_case, match_id, match_user
     );
 
     let row = sqlx::query(&sql)
         .bind(project_id.to_string())
         .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .fetch_optional(pool)
         .await?;
 
@@ -495,20 +504,12 @@ pub async fn get_project_critical_path(
 )]
 pub async fn update_project_plan(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(id): Path<Uuid>,
     Json(payload): Json<Vec<crate::models::project_plan::ProjectPlanCreateRequest>>,
 ) -> AppResult<Json<Vec<ProjectPlanPoint>>> {
     // ensure project exists and belongs to user
-    let match_id = uuid_sql::match_uuid_clause("id");
-    let sql_owner = format!("SELECT user_id FROM projects WHERE {} AND deleted_at IS NULL", match_id);
-    let owner_s = sqlx::query_scalar::<_, String>(&sql_owner)
-        .bind(id.to_string())
-        .bind(id.to_string())
-        .fetch_optional(&state.pool)
-        .await?;
-
-    let _owner = owner_s.ok_or_else(|| AppError::not_found("project not found"))?;
+    let _ = fetch_project(&state.pool, auth.user_id, id).await?;
 
     let mut tx = state.pool.begin().await?;
     let now = utc_now();
@@ -585,19 +586,11 @@ pub async fn update_project_plan(
 )]
 pub async fn clear_project_plan(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     // ensure project exists and belongs to user
-    let match_id = uuid_sql::match_uuid_clause("id");
-    let sql_owner = format!("SELECT user_id FROM projects WHERE {} AND deleted_at IS NULL", match_id);
-    let owner_s = sqlx::query_scalar::<_, String>(&sql_owner)
-    .bind(id.to_string())
-    .bind(id.to_string())
-    .fetch_optional(&state.pool)
-    .await?;
-
-    let _owner = owner_s.ok_or_else(|| AppError::not_found("project not found"))?;
+    let _ = fetch_project(&state.pool, auth.user_id, id).await?;
 
     let match_proj = uuid_sql::match_uuid_clause("project_id");
     let delete_plan_sql = format!("DELETE FROM project_plan WHERE {}", match_proj);

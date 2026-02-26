@@ -4,28 +4,16 @@ use axum::body::{self, Body};
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use serde_json::json;
-use sqlx::SqlitePool;
 use tower::util::ServiceExt; // for `oneshot`
-use tempfile::tempdir;
 
 use s_curve::create_app;
 
+mod support;
+
 #[tokio::test]
 async fn full_api_flow() -> Result<()> {
-    // create temp dir and sqlite db
-    let dir = tempdir().context("failed to create tempdir")?;
-    let db_path = dir.path().join("test.db");
-    // create a Sqlite pool pointing at the temp file and ensure file is created
-    use sqlx::sqlite::SqliteConnectOptions;
-    let opts = SqliteConnectOptions::new()
-        .filename(db_path.as_path())
-        .create_if_missing(true);
-    let pool = SqlitePool::connect_with(opts).await?;
-
-    // run migrations from crate migrations folder
-    let migrator = sqlx::migrate::Migrator::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
-        .await?;
-    migrator.run(&pool).await?;
+    let test_db = support::db::cloned_clean_db().await?;
+    let pool = test_db.pool.clone();
 
     // create app router
     // tests run in CI/container; ensure a JWT secret is available for signing tokens

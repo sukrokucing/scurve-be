@@ -52,6 +52,8 @@ use crate::models;
 			crate::routes::auth::ForgotPasswordRequest,
 			crate::routes::auth::ResetPasswordRequest,
 			crate::routes::auth::MessageResponse,
+			crate::models::audit_log::AuditLogEntry,
+			crate::models::audit_log::PaginatedAuditLogs,
 		)
 	),
 	paths(
@@ -83,6 +85,7 @@ use crate::models;
 		crate::routes::tasks::delete_dependency,
 
 		crate::routes::progress::list_progress,
+		crate::routes::progress::list_project_progress,
 		crate::routes::progress::get_progress,
 		crate::routes::progress::create_progress,
 		crate::routes::progress::update_progress,
@@ -104,6 +107,7 @@ use crate::models;
 		crate::routes::rbac::get_user_permissions,
 		crate::routes::rbac::grant_permission_to_user,
 		crate::routes::rbac::get_effective_permissions,
+		crate::routes::rbac::list_audit_logs,
 		crate::routes::users::list_users,
 		crate::routes::users::create_user,
 		crate::routes::users::update_user,
@@ -126,6 +130,7 @@ pub fn build_openapi(port: u16) -> anyhow::Result<utoipa::openapi::OpenApi> {
 	// Post-processing to refine the generated spec
 	ensure_security_components(&mut doc);
 	ensure_global_security(&mut doc);
+	ensure_public_route_security_overrides(&mut doc);
 	ensure_openapi_version(&mut doc);
 	add_examples(&mut doc);
 	ensure_servers(&mut doc, port);
@@ -188,6 +193,24 @@ fn ensure_global_security(doc: &mut Value) {
 		.or_insert_with(|| json!([{ "bearerAuth": [] }]));
 }
 
+fn ensure_public_route_security_overrides(doc: &mut Value) {
+	let public_ops = [
+		("/api/health", "get"),
+		("/auth/login", "post"),
+		("/auth/register", "post"),
+		("/auth/forgot-password", "post"),
+		("/auth/reset-password", "post"),
+	];
+
+	let Some(paths) = doc.get_mut("paths").and_then(Value::as_object_mut) else { return; };
+
+	for (path, method) in public_ops {
+		let Some(path_item) = paths.get_mut(path).and_then(Value::as_object_mut) else { continue; };
+		let Some(op) = path_item.get_mut(method).and_then(Value::as_object_mut) else { continue; };
+		op.insert("security".to_string(), json!([]));
+	}
+}
+
 fn ensure_openapi_version(doc: &mut Value) {
 	doc
 		.as_object_mut()
@@ -198,15 +221,110 @@ fn ensure_openapi_version(doc: &mut Value) {
 
 fn add_examples(doc: &mut Value) {
 	if let Some(paths) = doc.get_mut("paths").and_then(Value::as_object_mut) {
-		for item in paths.values_mut() {
+		for (path, item) in paths.iter_mut() {
 			if let Some(operations) = item.as_object_mut() {
-				for operation in operations.values_mut() {
+				for (method, operation) in operations.iter_mut() {
+					if is_http_method(method) {
+						apply_operation_metadata(operation, path, method);
+					}
 					apply_parameter_examples(operation);
 					apply_request_examples(operation);
 					apply_response_examples(operation);
 				}
 			}
 		}
+	}
+}
+
+fn is_http_method(method: &str) -> bool {
+	matches!(
+		method,
+		"get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+	)
+}
+
+fn apply_operation_metadata(operation: &mut Value, path: &str, method: &str) {
+	let Some(operation_obj) = operation.as_object_mut() else { return; };
+	let operation_id = operation_obj
+		.get("operationId")
+		.and_then(Value::as_str)
+		.map(|s| s.to_string());
+
+	let has_summary = operation_obj
+		.get("summary")
+		.and_then(Value::as_str)
+		.map(|s| !s.trim().is_empty())
+		.unwrap_or(false);
+
+	let summary = if has_summary {
+		operation_obj
+			.get("summary")
+			.and_then(Value::as_str)
+			.unwrap_or_default()
+			.to_string()
+	} else {
+		let generated = operation_id
+			.as_deref()
+			.map(humanize_operation_id)
+			.unwrap_or_else(|| format!("{} {}", method.to_uppercase(), path));
+		operation_obj.insert("summary".to_string(), Value::String(generated.clone()));
+		generated
+	};
+
+	let has_description = operation_obj
+		.get("description")
+		.and_then(Value::as_str)
+		.map(|s| !s.trim().is_empty())
+		.unwrap_or(false);
+
+	if !has_description {
+		let explicitly_public = operation_obj
+			.get("security")
+			.and_then(Value::as_array)
+			.map(|arr| arr.is_empty())
+			.unwrap_or(false);
+		let requires_auth = !explicitly_public;
+		let auth_suffix = if requires_auth {
+			" Requires bearer authentication."
+		} else {
+			" Does not require authentication."
+		};
+		let description = format!(
+			"{} Handles `{}` requests for `{}`.{}",
+			summary,
+			method.to_uppercase(),
+			path,
+			auth_suffix
+		);
+		operation_obj.insert("description".to_string(), Value::String(description));
+	}
+
+	if !has_summary {
+		operation_obj.insert("summary".to_string(), Value::String(summary));
+	}
+}
+
+fn humanize_operation_id(operation_id: &str) -> String {
+	let mut words = Vec::new();
+	for token in operation_id.split('_').filter(|token| !token.is_empty()) {
+		words.push(match token {
+			"id" => "ID".to_string(),
+			"rbac" => "RBAC".to_string(),
+			"api" => "API".to_string(),
+			other => {
+				let mut chars = other.chars();
+				match chars.next() {
+					Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+					None => String::new(),
+				}
+			}
+		});
+	}
+
+	if words.is_empty() {
+		"Operation".to_string()
+	} else {
+		words.join(" ")
 	}
 }
 
@@ -241,12 +359,27 @@ fn apply_request_examples(operation: &mut Value) {
 			"#/components/schemas/LoginRequest" => Some(json!({ "email": "user@example.com", "password": "password123" })),
 			"#/components/schemas/RegisterRequest" => Some(json!({ "name": "Test User", "email": "test@example.com", "password": "password123" })),
 			"#/components/schemas/ProjectCreateRequest" => Some(json!({ "name": "Launch Planning", "description": "Prepare milestones.", "theme_color": "#3498db" })),
+			"#/components/schemas/ProjectUpdateRequest" => Some(json!({ "name": "Launch Planning v2", "theme_color": "#2ecc71" })),
 			"#/components/schemas/TaskCreateRequest" => Some(json!({ "title": "Define launch checklist", "status": "pending" })),
+			"#/components/schemas/TaskUpdateRequest" => Some(json!({ "title": "Define final checklist", "status": "in_progress", "progress": 65 })),
+			"#/components/schemas/ProjectPlanCreateRequest" => Some(json!({ "date": "2025-12-01T00:00:00Z", "planned_progress": 10 })),
 			"#/components/schemas/ProgressCreateRequest" => Some(json!({ "progress": 50, "note": "Halfway there" })),
-			"#/components/schemas/DependencyCreateRequest" => Some(json!({ "source_task_id": "0000-...", "target_task_id": "1111-...", "type": "finish_to_start" })),
-			"#/components/schemas/TaskBatchUpdatePayload" => Some(json!({ "tasks": [{ "id": "0000-...", "status": "in_progress", "progress": 50 }] })),
+			"#/components/schemas/ProgressUpdateRequest" => Some(json!({ "progress": 75, "note": "Adjusted after review" })),
+			"#/components/schemas/DependencyCreateRequest" => Some(json!({
+				"source_task_id": "11111111-1111-4111-8111-111111111111",
+				"target_task_id": "22222222-2222-4222-8222-222222222222",
+				"type_": "finish_to_start"
+			})),
+			"#/components/schemas/TaskBatchUpdatePayload" => Some(json!({
+				"tasks": [{
+					"id": "33333333-3333-4333-8333-333333333333",
+					"status": "in_progress",
+					"progress": 50
+				}]
+			})),
 			"#/components/schemas/RoleCreateRequest" => Some(json!({ "name": "project_manager", "description": "Can manage project tasks" })),
 			"#/components/schemas/PermissionCreateRequest" => Some(json!({ "name": "project.view", "description": "View projects" })),
+			"#/components/schemas/AssignPermissionToRoleRequest" => Some(json!({ "permission_id": "66666666-6666-4666-8666-666666666666" })),
 			"#/components/schemas/AssignRoleRequest" => Some(json!({ "role_id": "00000000-0000-0000-0000-000000000000" })),
 			"#/components/schemas/GrantPermissionRequest" => Some(json!({ "permission_id": "00000000-0000-0000-0000-000000000000", "scope": { "project_id": "00000000-0000-0000-0000-000000000000" } })),
 			"#/components/schemas/CreateUserRequest" => Some(json!({ "name": "Developer One", "email": "dev1@example.com", "password": "SecurePassword123!" })),
@@ -285,21 +418,136 @@ fn apply_response_examples(operation: &mut Value) {
 				match r {
 					"#/components/schemas/AuthResponse" => Some(json!({
 						"token": "eyJhbGciOiJIUzI1Ni...",
-						"user": { "id": "0000-0000...", "name": "Ada", "email": "ada@eg.com" }
+						"user": {
+							"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+							"name": "Ada Lovelace",
+							"email": "ada@example.com",
+							"provider": "local",
+							"created_at": "2025-01-15T10:00:00Z",
+							"updated_at": "2025-01-15T10:00:00Z"
+						}
+					})),
+					"#/components/schemas/HealthResponse" => Some(json!({
+						"status": "ok",
+						"db_ok": true
+					})),
+					"#/components/schemas/User" => Some(json!({
+						"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"provider": "local",
+						"created_at": "2025-01-15T10:00:00Z",
+						"updated_at": "2025-01-15T10:00:00Z"
 					})),
 					"#/components/schemas/Project" => Some(json!({
-						"id": "uuid", "name": "Launch Planning", "theme_color": "#3498db"
+						"id": "44444444-4444-4444-8444-444444444444",
+						"user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"name": "Launch Planning",
+						"theme_color": "#3498db",
+						"created_at": "2025-01-15T10:00:00Z",
+						"updated_at": "2025-01-15T10:00:00Z"
 					})),
 					"#/components/schemas/Task" => Some(json!({
-						"id": "uuid", "title": "Define checklist", "status": "pending", "progress": 0
+						"id": "33333333-3333-4333-8333-333333333333",
+						"project_id": "44444444-4444-4444-8444-444444444444",
+						"title": "Define checklist",
+						"status": "pending",
+						"progress": 0,
+						"created_at": "2025-01-16T09:00:00Z",
+						"updated_at": "2025-01-16T09:00:00Z"
+					})),
+					"#/components/schemas/CriticalPathResponse" => Some(json!({
+						"task_ids": [
+							"33333333-3333-4333-8333-333333333333",
+							"22222222-2222-4222-8222-222222222222"
+						]
+					})),
+					"#/components/schemas/DashboardResponse" => Some(json!({
+						"project": {
+							"id": "44444444-4444-4444-8444-444444444444",
+							"user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+							"name": "Launch Planning",
+							"theme_color": "#3498db",
+							"created_at": "2025-01-15T10:00:00Z",
+							"updated_at": "2025-01-15T10:00:00Z"
+						},
+						"plan": [{
+							"id": "77777777-7777-4777-8777-777777777777",
+							"project_id": "44444444-4444-4444-8444-444444444444",
+							"date": "2025-12-01T00:00:00Z",
+							"planned_progress": 20,
+							"created_at": "2025-11-20T08:00:00Z",
+							"updated_at": "2025-11-20T08:00:00Z"
+						}],
+						"actual": [{ "date": "2025-12-01", "actual": 15 }]
+					})),
+					"#/components/schemas/ProjectPlanPoint" => Some(json!({
+						"id": "77777777-7777-4777-8777-777777777777",
+						"project_id": "44444444-4444-4444-8444-444444444444",
+						"date": "2025-12-01T00:00:00Z",
+						"planned_progress": 20,
+						"created_at": "2025-11-20T08:00:00Z",
+						"updated_at": "2025-11-20T08:00:00Z"
+					})),
+					"#/components/schemas/TaskDependency" => Some(json!({
+						"id": "88888888-8888-4888-8888-888888888888",
+						"source_task_id": "33333333-3333-4333-8333-333333333333",
+						"target_task_id": "22222222-2222-4222-8222-222222222222",
+						"type_": "finish_to_start",
+						"created_at": "2025-01-18T09:00:00Z"
+					})),
+					"#/components/schemas/Progress" => Some(json!({
+						"id": "99999999-9999-4999-8999-999999999999",
+						"project_id": "44444444-4444-4444-8444-444444444444",
+						"task_id": "33333333-3333-4333-8333-333333333333",
+						"progress": 65,
+						"note": "Execution started",
+						"created_at": "2025-01-19T09:00:00Z",
+						"updated_at": "2025-01-19T09:00:00Z"
 					})),
 					"#/components/schemas/Role" => Some(json!({
-						"id": "uuid", "name": "super_admin", "description": "Full access"
+						"id": "55555555-5555-4555-8555-555555555555",
+						"name": "super_admin",
+						"description": "Full access",
+						"created_at": "2025-01-01T00:00:00Z",
+						"updated_at": "2025-01-01T00:00:00Z"
+					})),
+					"#/components/schemas/Permission" => Some(json!({
+						"id": "66666666-6666-4666-8666-666666666666",
+						"name": "project.view",
+						"description": "View projects",
+						"created_at": "2025-01-01T00:00:00Z",
+						"updated_at": "2025-01-01T00:00:00Z"
+					})),
+					"#/components/schemas/UserPermission" => Some(json!({
+						"id": "abababab-abab-4bab-8bab-abababababab",
+						"user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"permission_id": "66666666-6666-4666-8666-666666666666",
+						"scope": { "project_id": "44444444-4444-4444-8444-444444444444" },
+						"created_at": "2025-01-20T10:00:00Z"
 					})),
 					"#/components/schemas/EffectivePermissions" => Some(json!({
-						"user_id": "uuid",
+						"user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 						"roles": ["super_admin"],
 						"permissions": [{ "name": "*", "source": "role", "role_name": "super_admin" }]
+					})),
+					"#/components/schemas/PaginatedAuditLogs" => Some(json!({
+						"items": [{
+							"id": "evt_20250120_0001",
+							"action": "role.assign",
+							"details": {
+								"role_id": "55555555-5555-4555-8555-555555555555",
+								"user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+							},
+							"created_at": "2025-01-20T10:15:00Z",
+							"actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+							"actor_name": "Ada Lovelace",
+							"target_user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+							"target_user_name": "Ada Lovelace"
+						}],
+						"total": 1,
+						"page": 1,
+						"per_page": 20
 					})),
 					"#/components/schemas/MessageResponse" => Some(json!({ "message": "Operation successful" })),
 					"#/components/schemas/DeletedResponse" => Some(json!({ "message": "User deleted" })),

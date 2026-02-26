@@ -9,7 +9,7 @@ use crate::db::{uuid_sql, row_parsers};
 use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
-use crate::models::progress::{DbProgress, Progress, ProgressCreateRequest, ProgressUpdateRequest};
+use crate::models::progress::{Progress, ProgressCreateRequest, ProgressUpdateRequest};
 use crate::utils::utc_now;
 
 #[utoipa::path(
@@ -62,7 +62,10 @@ pub struct ProgressFilter {
     get,
     path = "/projects/{project_id}/progress",
     tag = "Progress",
-    params(("project_id" = Uuid, Path, description = "Project id")),
+    params(
+        ("project_id" = Uuid, Path, description = "Project id"),
+        ("task_id" = Option<Uuid>, Query, description = "Optional task id filter.")
+    ),
     responses((status = 200, description = "List progress entries", body = [Progress])),
     security(("bearerAuth" = []))
 )]
@@ -75,11 +78,14 @@ pub async fn list_project_progress(
 ) -> AppResult<Json<Vec<Progress>>> {
     // verify project belongs to user
     let match_proj = uuid_sql::match_uuid_clause("id");
+    let match_user = uuid_sql::match_uuid_clause("user_id");
     let user_case = uuid_sql::case_uuid("user_id");
-    let sql_owner = format!("SELECT {} FROM projects WHERE {} AND deleted_at IS NULL", user_case, match_proj);
+    let sql_owner = format!("SELECT {} FROM projects WHERE {} AND {} AND deleted_at IS NULL", user_case, match_proj, match_user);
     let owner_s = sqlx::query_scalar::<_, String>(&sql_owner)
         .bind(project_id.to_string())
         .bind(project_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
         .fetch_optional(&state.pool)
         .await?;
 
@@ -93,16 +99,19 @@ pub async fn list_project_progress(
         // ensure task belongs to project
         let p_match = uuid_sql::match_uuid_clause("p.id");
         let t_match = uuid_sql::match_uuid_clause("t.id");
+        let p_user_match = uuid_sql::match_uuid_clause("p.user_id");
         let user_case = uuid_sql::case_uuid("p.user_id");
         let sql_t_owner = format!(
-            "SELECT {} FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-            user_case, p_match, t_match
+            "SELECT {} FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
+            user_case, p_match, t_match, p_user_match
         );
         let _t_owner = sqlx::query_scalar::<_, String>(&sql_t_owner)
             .bind(project_id.to_string())
             .bind(project_id.to_string())
             .bind(task_id.to_string())
             .bind(task_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
             .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::not_found("task not found"))?;
@@ -172,11 +181,19 @@ pub async fn create_progress(
     let id = Uuid::new_v4();
     let now = utc_now();
 
-    sqlx::query(
-        "INSERT INTO task_progress (id, task_id, project_id, progress, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+    let match_task = uuid_sql::match_uuid_clause("id");
+    let match_project = uuid_sql::match_uuid_clause("id");
+    let insert_sql = format!(
+        "INSERT INTO task_progress (id, task_id, project_id, progress, note, created_at, updated_at) \
+         VALUES (?, (SELECT id FROM tasks WHERE {}), (SELECT id FROM projects WHERE {}), ?, ?, ?, ?)",
+        match_task, match_project
+    );
+
+    sqlx::query(&insert_sql)
     .bind(id.to_string())
     .bind(task_id.to_string())
+    .bind(task_id.to_string())
+    .bind(project_id.to_string())
     .bind(project_id.to_string())
     .bind(payload.progress)
     .bind(payload.note)
@@ -350,12 +367,13 @@ pub async fn get_progress(
     Ok(Json(item))
 }
 
-async fn ensure_task_belongs_to_user(pool: &SqlitePool, _user_id: Uuid, project_id: Uuid, task_id: Uuid) -> AppResult<()> {
+async fn ensure_task_belongs_to_user(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id: Uuid) -> AppResult<()> {
     let match_proj = uuid_sql::match_uuid_clause("p.id");
     let match_task = uuid_sql::match_uuid_clause("t.id");
+    let match_user = uuid_sql::match_uuid_clause("p.user_id");
     let sql = format!(
-        "SELECT p.user_id FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-        match_proj, match_task
+        "SELECT p.user_id FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
+        match_proj, match_task, match_user
     );
 
     let owner_s = sqlx::query_scalar::<_, String>(&sql)
@@ -363,6 +381,8 @@ async fn ensure_task_belongs_to_user(pool: &SqlitePool, _user_id: Uuid, project_
         .bind(project_id.to_string())
         .bind(task_id.to_string())
         .bind(task_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .fetch_optional(pool)
         .await?;
 

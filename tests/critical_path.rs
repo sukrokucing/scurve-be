@@ -1,30 +1,11 @@
-use sqlx::SqlitePool;
+mod support;
+
 use uuid::Uuid;
 
 #[tokio::test]
 async fn test_critical_path_basic() -> anyhow::Result<()> {
-    let db_path = format!("/apps/scurve-be/tmp/test-db-{}.sqlite", Uuid::new_v4());
-    let db_url = format!("sqlite:///{}", db_path);
-    let _ = std::fs::File::create(&db_path)?;
-    let pool = SqlitePool::connect(&db_url).await?;
-
-    // Setup Schema
-    sqlx::query("CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, provider TEXT NOT NULL, provider_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-    );").execute(&pool).await?;
-
-    sqlx::query("CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT, theme_color TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-    );").execute(&pool).await?;
-
-    sqlx::query("CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, due_date TEXT, start_date TEXT, end_date TEXT, duration_days INTEGER, assignee TEXT, parent_id TEXT, progress INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-    );").execute(&pool).await?;
-
-    sqlx::query("CREATE TABLE IF NOT EXISTS task_dependencies (
-        id TEXT PRIMARY KEY, source_task_id TEXT NOT NULL, target_task_id TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'finish_to_start', created_at TEXT NOT NULL,
-        CHECK (source_task_id != target_task_id)
-    );").execute(&pool).await?;
+    let test_db = support::db::cloned_clean_db().await?;
+    let pool = test_db.pool.clone();
 
     // Setup Data
     let user_id = Uuid::new_v4();
@@ -34,7 +15,7 @@ async fn test_critical_path_basic() -> anyhow::Result<()> {
     let c = Uuid::new_v4();
     let d = Uuid::new_v4();
 
-    sqlx::query("INSERT INTO users (id, name, email, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'local', datetime('now'), datetime('now'))")
+    sqlx::query("INSERT INTO users (id, name, email, password_hash, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'hash', 'local', datetime('now'), datetime('now'))")
         .bind(user_id.to_string()).execute(&pool).await?;
 
     sqlx::query("INSERT INTO projects (id, user_id, name, theme_color, created_at, updated_at) VALUES (?, ?, 'P', '#000', datetime('now'), datetime('now'))")
@@ -66,7 +47,7 @@ async fn test_critical_path_basic() -> anyhow::Result<()> {
 
     let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus);
+    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
     let auth = AuthUser { user_id };
 
     // Call critical path endpoint
@@ -80,7 +61,5 @@ async fn test_critical_path_basic() -> anyhow::Result<()> {
     assert_eq!(ids[1], b);
     assert_eq!(ids[2], c);
 
-    // Cleanup
-    let _ = std::fs::remove_file(db_path);
     Ok(())
 }

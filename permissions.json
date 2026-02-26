@@ -1,0 +1,22 @@
+[
+  { "name": "PROJECT_CREATE", "value": "project.create" },
+  { "name": "PROJECT_VIEW", "value": "project.view" },
+  { "name": "PROJECT_UPDATE", "value": "project.update" },
+  { "name": "PROJECT_DELETE", "value": "project.delete" },
+
+  { "name": "TASK_CREATE", "value": "task.create" },
+  { "name": "TASK_VIEW", "value": "task.view" },
+  { "name": "TASK_UPDATE", "value": "task.update" },
+  { "name": "TASK_DELETE", "value": "task.delete" },
+
+  { "name": "PROGRESS_CREATE", "value": "progress.create" },
+  { "name": "PROGRESS_VIEW", "value": "progress.view" },
+
+  { "name": "USER_VIEW", "value": "user.view" },
+  { "name": "USER_MANAGE", "value": "user.manage" },
+
+  { "name": "ROLE_VIEW", "value": "role.view" },
+  { "name": "ROLE_MANAGE", "value": "role.manage" },
+  { "name": "PERMISSION_VIEW", "value": "permission.view" },
+  { "name": "PERMISSION_MANAGE", "value": "permission.manage" }
+]

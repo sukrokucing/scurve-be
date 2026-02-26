@@ -24,7 +24,11 @@ pub struct TaskListQuery {
     get,
     path = "/projects/{project_id}/tasks",
     tag = "Tasks",
-    params(("project_id" = Uuid, Path, description = "Project id")),
+    params(
+        ("project_id" = Uuid, Path, description = "Project id"),
+        ("progress" = Option<bool>, Query, description = "Legacy compatibility flag. When true, task list response is empty; use /progress endpoints instead."),
+        ("task_id" = Option<Uuid>, Query, description = "Optional task filter used only with progress=true.")
+    ),
     responses((status = 200, description = "List tasks", body = [Task])),
     security(("bearerAuth" = []))
 )]
@@ -168,17 +172,6 @@ pub async fn create_task(
 ) -> AppResult<(StatusCode, Json<Task>)> {
     ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
 
-    // We need to fetch the project explicitly to get its canonical ID (BLOB or TEXT)
-    // to satisfy the SQLite FOREIGN KEY constraint in the tasks table.
-    let match_proj_id = uuid_sql::match_uuid_clause("id");
-    let sql_proj = format!("SELECT id FROM projects WHERE {} AND deleted_at IS NULL", match_proj_id);
-    let proj_id_raw: Vec<u8> = sqlx::query_scalar(&sql_proj)
-        .bind(project_id.to_string())
-        .bind(project_id.to_string())
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| AppError::not_found("project not found"))?;
-
     let task_id = Uuid::new_v4();
     let now = utc_now();
     let status = payload.status.clone().unwrap_or_else(|| "pending".to_string());
@@ -200,12 +193,17 @@ pub async fn create_task(
         }
     }
 
-    sqlx::query(
+    let match_proj = uuid_sql::match_uuid_clause("id");
+    let insert_sql = format!(
         "INSERT INTO tasks (id, project_id, title, status, due_date, start_date, end_date, assignee, parent_id, progress, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
+         VALUES (?, (SELECT id FROM projects WHERE {} AND deleted_at IS NULL), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        match_proj
+    );
+
+    sqlx::query(&insert_sql)
     .bind(task_id.to_string())
-    .bind(proj_id_raw) // Bind the raw BLOB to satisfy FK constraint
+    .bind(project_id.to_string())
+    .bind(project_id.to_string())
     .bind(&payload.title)
     .bind(status)
     .bind(payload.due_date)
@@ -512,11 +510,19 @@ pub async fn create_dependency(
     let id = Uuid::new_v4();
     let now = utc_now();
 
-    sqlx::query(
-        "INSERT INTO task_dependencies (id, source_task_id, target_task_id, type, created_at) VALUES (?, ?, ?, ?, ?)"
-    )
+    let match_source = uuid_sql::match_uuid_clause("id");
+    let match_target = uuid_sql::match_uuid_clause("id");
+    let insert_sql = format!(
+        "INSERT INTO task_dependencies (id, source_task_id, target_task_id, type, created_at) \
+         VALUES (?, (SELECT id FROM tasks WHERE {}), (SELECT id FROM tasks WHERE {}), ?, ?)",
+        match_source, match_target
+    );
+
+    sqlx::query(&insert_sql)
     .bind(id.to_string())
     .bind(payload.source_task_id.to_string())
+    .bind(payload.source_task_id.to_string())
+    .bind(payload.target_task_id.to_string())
     .bind(payload.target_task_id.to_string())
     .bind(&payload.type_)
     .bind(now)
@@ -726,13 +732,16 @@ pub async fn batch_update_tasks(
     Ok(Json(tasks))
 }
 
-async fn ensure_project_membership(pool: &SqlitePool, _user_id: Uuid, project_id: Uuid) -> AppResult<()> {
+async fn ensure_project_membership(pool: &SqlitePool, user_id: Uuid, project_id: Uuid) -> AppResult<()> {
     let match_id = uuid_sql::match_uuid_clause("id");
     let user_case = uuid_sql::case_uuid("user_id");
-    let sql = format!("SELECT {} FROM projects WHERE {} AND deleted_at IS NULL", user_case, match_id);
+    let match_user = uuid_sql::match_uuid_clause("user_id");
+    let sql = format!("SELECT {} FROM projects WHERE {} AND {} AND deleted_at IS NULL", user_case, match_id, match_user);
     let owner_s = sqlx::query_scalar::<_, String>(&sql)
         .bind(project_id.to_string())
         .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .fetch_optional(pool)
         .await?;
 

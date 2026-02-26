@@ -12,7 +12,9 @@ use axum::{
 use tower::ServiceExt;
 use serde_json::json;
 
-async fn setup() -> (Router, SqlitePool, String) {
+mod support;
+
+async fn setup() -> (Router, SqlitePool, String, support::db::TestDb) {
     // Set up env
     let _ = tracing_subscriber::fmt()
         .with_env_filter("s_curve=trace,axum=trace,tower_http=trace")
@@ -21,13 +23,8 @@ async fn setup() -> (Router, SqlitePool, String) {
     std::env::set_var("JWT_SECRET", "test_secret_key_scoped_rbac");
     std::env::set_var("AUTHZ_MODE", "strict"); // Important: enforce strict mode
 
-    let _ = dotenvy::dotenv();
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let test_db = support::db::cloned_clean_db().await.unwrap();
+    let pool = test_db.pool.clone();
 
     let (tx, _rx) = s_curve::events::init_event_bus();
     let state = s_curve::app::AppState {
@@ -37,6 +34,7 @@ async fn setup() -> (Router, SqlitePool, String) {
             exp_hours: 1,
         }),
         event_bus: tx,
+        route_permission_cache: s_curve::authz::RoutePermissionCache::load(&pool).await.unwrap(),
     };
 
     let app = s_curve::app::api_routes(state);
@@ -59,7 +57,7 @@ async fn setup() -> (Router, SqlitePool, String) {
         .bind(role_id.to_string())
         .execute(&pool).await.expect("Failed to insert user_role");
 
-    (app, pool, admin_token)
+    (app, pool, admin_token, test_db)
 }
 
 fn insert_hyphens(s: &str) -> String {
@@ -128,44 +126,34 @@ async fn create_project(app: &Router, token: &str, name: &str) -> String {
 
 #[tokio::test]
 async fn test_scoped_permission_enforcement() {
-    let (app, pool, admin_token) = setup().await;
+    let (app, pool, admin_token, _test_db) = setup().await;
 
-    // 1. Create two projects
-    let project_a_id = create_project(&app, &admin_token, "Project A").await;
-    let project_b_id = create_project(&app, &admin_token, "Project B").await;
-
-    // 2. Create a restricted user
+    // 1. Create a restricted user
     let user_token = create_user(&app, "User", "user@example.com").await;
     let user_id = fetch_id(&pool, "users", "email", "user@example.com").await;
 
-    // 3. Grant `project.view` permission ONLY for Project A
-    let perm_id = fetch_id(&pool, "permissions", "name", "project.view").await;
-
-    let scope = json!({ "project_id": project_a_id });
-
-    let grant_req = GrantPermissionRequest {
-        permission_id: perm_id,
-        scope: Some(scope),
+    // 2. Grant `project.create` so the user can create projects they own.
+    let perm_project_create_id = fetch_id(&pool, "permissions", "name", "project.create").await;
+    let grant_project_create = GrantPermissionRequest {
+        permission_id: perm_project_create_id,
+        scope: None,
     };
-
     let req = Request::builder()
         .method("POST")
         .uri(&format!("/rbac/users/{}/permissions", user_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", admin_token))
-        .body(Body::from(serde_json::to_string(&grant_req).unwrap()))
+        .body(Body::from(serde_json::to_string(&grant_project_create).unwrap()))
         .unwrap();
-
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 
-    // 4. Try to access Project A tasks (Should be ALLOWED)
-    // Assuming GET /projects/:id/tasks requires `task.view`? No, usually `project.view` allows viewing project things.
-    // Check middleware on `list_tasks`. It requires `task.view`.
-    // Wait, I granted `project.view`, not `task.view`. Let's grant `task.view` scoped.
+    // 3. User creates two projects. Ownership checks now pass for both.
+    let project_a_id = create_project(&app, &user_token, "Project A").await;
+    let project_b_id = create_project(&app, &user_token, "Project B").await;
 
+    // 4. Grant `task.view` scoped only to Project A.
     let perm_task_view_id = fetch_id(&pool, "permissions", "name", "task.view").await;
-
     let grant_req_task = GrantPermissionRequest {
         permission_id: perm_task_view_id,
         scope: Some(json!({ "project_id": project_a_id })),
@@ -182,7 +170,7 @@ async fn test_scoped_permission_enforcement() {
     assert_eq!(res.status(), StatusCode::CREATED);
 
 
-    // Access Project A tasks
+    // 5. Access Project A tasks (allowed)
     let req = Request::builder()
         .method("GET")
         .uri(&format!("/projects/{}/tasks", project_a_id))
@@ -193,7 +181,7 @@ async fn test_scoped_permission_enforcement() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK, "Should be allowed to view Project A tasks");
 
-    // 5. Try to access Project B tasks (Should be DENIED)
+    // 6. Access Project B tasks (denied due scoped permission mismatch)
     let req = Request::builder()
         .method("GET")
         .uri(&format!("/projects/{}/tasks", project_b_id))

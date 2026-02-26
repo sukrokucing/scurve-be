@@ -1,95 +1,17 @@
-use sqlx::SqlitePool;
+mod support;
+
 use uuid::Uuid;
 
 #[tokio::test]
 async fn create_update_task_with_timeline() -> anyhow::Result<()> {
-    // This integration test expects a running test database and the server
-    // helpers. We'll spawn the CLI migrator to prepare a temporary sqlite DB
-    // referenced by DATABASE_URL env var for this test.
-
-    let db_path = format!("/apps/scurve-be/tmp/test-db-{}.sqlite", Uuid::new_v4());
-    // Use three slashes for absolute sqlite file paths (sqlite:///path)
-    let db_url = format!("sqlite:///{}", db_path);
-
-    // Ensure the DB file exists (create empty file) so sqlite can open it
-    let _ = std::fs::File::create(&db_path)?;
-
-    // Connect and create minimal schema needed for the test (avoid running full migrations)
-    let pool = SqlitePool::connect(&db_url).await?;
-
-    // Create minimal tables required for handlers to operate
-    sqlx::query("CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        provider_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        deleted_at TEXT
-    );")
-        .execute(&pool)
-        .await?;
-
-    sqlx::query("CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        theme_color TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        deleted_at TEXT
-    );")
-        .execute(&pool)
-        .await?;
-
-    sqlx::query("CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        status TEXT NOT NULL,
-        due_date TEXT,
-        start_date TEXT,
-        end_date TEXT,
-        duration_days INTEGER,
-        assignee TEXT,
-        parent_id TEXT,
-        progress INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        deleted_at TEXT
-    );")
-        .execute(&pool)
-        .await?;
-
-    // Add triggers for duration_days (mimicking migration 202511190001)
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS trg_tasks_set_duration_insert
-        AFTER INSERT ON tasks
-        WHEN NEW.start_date IS NOT NULL AND NEW.end_date IS NOT NULL
-        BEGIN
-          UPDATE tasks
-          SET duration_days = CAST(julianday(NEW.end_date) - julianday(NEW.start_date) AS INTEGER)
-          WHERE id = NEW.id;
-        END;")
-        .execute(&pool)
-        .await?;
-
-    sqlx::query("CREATE TRIGGER IF NOT EXISTS trg_tasks_set_duration_update
-        AFTER UPDATE OF start_date, end_date ON tasks
-        WHEN NEW.start_date IS NOT NULL AND NEW.end_date IS NOT NULL
-        BEGIN
-          UPDATE tasks
-          SET duration_days = CAST(julianday(NEW.end_date) - julianday(NEW.start_date) AS INTEGER)
-          WHERE id = NEW.id;
-        END;")
-        .execute(&pool)
-        .await?;
+    let test_db = support::db::cloned_clean_db().await?;
+    let pool = test_db.pool.clone();
 
     // Create a test user and project directly in DB to avoid depending on auth flows
     let user_id = Uuid::new_v4();
     let project_id = Uuid::new_v4();
 
-    sqlx::query("INSERT INTO users (id, name, email, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'local', datetime('now'), datetime('now'))")
+    sqlx::query("INSERT INTO users (id, name, email, password_hash, provider, created_at, updated_at) VALUES (?, 'T', 't@example.com', 'hash', 'local', datetime('now'), datetime('now'))")
         .bind(user_id.to_string())
         .execute(&pool)
         .await?;
@@ -111,7 +33,7 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
 
     let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus);
+    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
 
     // Create payload
     let payload = TaskCreateRequest {
@@ -197,10 +119,6 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     // Should be sorted by start_date ASC. Early Task (Sept) first, Updated Task (Nov) second.
     assert_eq!(tasks[0].title, "Early Task");
     assert_eq!(tasks[1].title, "Updated Title");
-
-
-    // Cleanup file
-    let _ = std::fs::remove_file(db_path);
 
     Ok(())
 }

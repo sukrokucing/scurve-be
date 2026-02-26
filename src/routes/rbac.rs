@@ -1,16 +1,9 @@
-//! RBAC Admin API Routes
-//!
-//! Endpoints for managing roles, permissions, and user assignments.
-//! All RBAC modifications are logged to the activity log with Critical severity.
-
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     routing::{get, delete},
     Json, Router,
-    middleware::from_fn_with_state,
 };
-use crate::authz;
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::Row;
@@ -21,51 +14,33 @@ use crate::errors::AppError;
 use crate::events::{log_activity_with_context, RequestContext};
 use crate::jwt::AuthUser;
 use crate::models::rbac::*;
+use crate::models::audit_log::{AuditLogEntry, AuditLogFilter, PaginatedAuditLogs};
 
 // =============================================================================
 // ROUTER
 // =============================================================================
 
-pub fn routes(state: AppState) -> Router<AppState> {
+pub fn routes(_state: AppState) -> Router<AppState> {
     Router::new()
         // Roles
-        .route("/roles", get(list_roles)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_view))
-            .post(create_role)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_manage)))
-        .route("/roles/:role_id", get(get_role)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_view))
-            .delete(delete_role)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_manage)))
-        .route("/roles/:role_id/permissions", get(get_role_permissions)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_view))
-            .post(assign_permission_to_role)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_manage)))
+        .route("/roles", get(list_roles).post(create_role))
+        .route("/roles/:role_id", get(get_role).delete(delete_role))
+        .route("/roles/:role_id/permissions", get(get_role_permissions).post(assign_permission_to_role))
         .route(
             "/roles/:role_id/permissions/:permission_id",
-            delete(delete_permission_from_role)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_manage)),
+            delete(delete_permission_from_role),
         )
         // Permissions
-        .route("/permissions", get(list_permissions)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_permission_view))
-            .post(create_permission)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_permission_manage)))
+        .route("/permissions", get(list_permissions).post(create_permission))
         // User role assignments
-        .route("/users/:user_id/roles", get(get_user_roles)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_view))
-            .post(assign_role_to_user)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_manage)))
-        .route("/users/:user_id/roles/:role_id", delete(revoke_role_from_user)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_role_manage)))
+        .route("/users/:user_id/roles", get(get_user_roles).post(assign_role_to_user))
+        .route("/users/:user_id/roles/:role_id", delete(revoke_role_from_user))
         // User direct permissions
-        .route("/users/:user_id/permissions", get(get_user_permissions)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_permission_view))
-            .post(grant_permission_to_user)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_permission_manage)))
+        .route("/users/:user_id/permissions", get(get_user_permissions).post(grant_permission_to_user))
         // Effective permissions (computed)
-        .route("/users/:user_id/effective-permissions", get(get_effective_permissions)
-            .layer(from_fn_with_state(state.clone(), authz::layer::require_user_view)))
+        .route("/users/:user_id/effective-permissions", get(get_effective_permissions))
+        // Audit logs
+        .route("/audit-logs", get(list_audit_logs))
 }
 
 // =============================================================================
@@ -297,11 +272,16 @@ async fn assign_permission_to_role(
         .await?;
 
     if existing.is_none() {
-        // Insert as strings (standard for new writes)
-        sqlx::query(
-            "INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, ?)"
-        )
+        let match_role = match_uuid_clause("id");
+        let match_perm = match_uuid_clause("id");
+        let insert_sql = format!(
+            "INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES ((SELECT id FROM roles WHERE {}), (SELECT id FROM permissions WHERE {}), ?)",
+            match_role, match_perm
+        );
+        sqlx::query(&insert_sql)
         .bind(role_id.to_string())
+        .bind(role_id.to_string())
+        .bind(req.permission_id.to_string())
         .bind(req.permission_id.to_string())
         .bind(now)
         .execute(&state.pool)
@@ -609,10 +589,16 @@ async fn assign_role_to_user(
         .await?;
 
     if existing.is_none() {
-        sqlx::query(
-            "INSERT INTO user_roles (user_id, role_id, created_at) VALUES (?, ?, ?)"
-        )
+        let match_user = match_uuid_clause("id");
+        let match_role = match_uuid_clause("id");
+        let insert_sql = format!(
+            "INSERT INTO user_roles (user_id, role_id, created_at) VALUES ((SELECT id FROM users WHERE {}), (SELECT id FROM roles WHERE {}), ?)",
+            match_user, match_role
+        );
+        sqlx::query(&insert_sql)
         .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .bind(req.role_id.to_string())
         .bind(req.role_id.to_string())
         .bind(now)
         .execute(&state.pool)
@@ -774,11 +760,19 @@ async fn grant_permission_to_user(
     let scope_str = serde_json::to_string(&scope_val)
         .map_err(|e| AppError::bad_request(format!("Invalid scope JSON: {}", e)))?;
 
-    sqlx::query(
-        "INSERT INTO user_permissions (id, user_id, permission_id, scope, created_at) VALUES (?, ?, ?, ?, ?)"
-    )
+    use crate::db::uuid_sql::match_uuid_clause;
+    let match_user = match_uuid_clause("id");
+    let match_perm = match_uuid_clause("id");
+    let insert_sql = format!(
+        "INSERT INTO user_permissions (id, user_id, permission_id, scope, created_at) VALUES (?, (SELECT id FROM users WHERE {}), (SELECT id FROM permissions WHERE {}), ?, ?)",
+        match_user, match_perm
+    );
+
+    sqlx::query(&insert_sql)
     .bind(id.to_string())
     .bind(user_id.to_string())
+    .bind(user_id.to_string())
+    .bind(req.permission_id.to_string())
     .bind(req.permission_id.to_string())
     .bind(&scope_str)
     .bind(now)
@@ -912,4 +906,128 @@ async fn get_effective_permissions(
         roles,
         permissions,
     }))
+}
+
+// =============================================================================
+// AUDIT LOG ENDPOINT
+// =============================================================================
+
+#[utoipa::path(
+    get,
+    path = "/rbac/audit-logs",
+    tag = "RBAC",
+    params(AuditLogFilter),
+    responses(
+        (status = 200, description = "Paginated audit log entries", body = PaginatedAuditLogs,
+         headers(
+            ("X-Total-Count" = i64, description = "Total number of matching entries")
+         )
+        )
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn list_audit_logs(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    axum::extract::Query(filter): axum::extract::Query<AuditLogFilter>,
+) -> Result<(axum::http::HeaderMap, Json<PaginatedAuditLogs>), AppError> {
+    use crate::db::uuid_sql;
+
+    // Clamp per_page to max 100
+    let per_page = filter.per_page.min(100).max(1);
+    let page = filter.page.max(1);
+    let offset = (page - 1) * per_page;
+
+    // Build dynamic WHERE clause
+    let mut conditions = vec!["1=1".to_string()];
+    let mut bind_values: Vec<String> = vec![];
+
+    if let Some(ref action) = filter.action {
+        conditions.push("event_name = ?".to_string());
+        bind_values.push(action.clone());
+    }
+
+    if let Some(ref user_id) = filter.user_id {
+        conditions.push(format!("({})", uuid_sql::match_uuid_clause("subject_id")));
+        bind_values.push(user_id.to_string());
+        bind_values.push(user_id.to_string());
+    }
+
+    if let Some(ref actor_id) = filter.actor_id {
+        conditions.push(format!("({})", uuid_sql::match_uuid_clause("actor_id")));
+        bind_values.push(actor_id.to_string());
+        bind_values.push(actor_id.to_string());
+    }
+
+    if let Some(ref from) = filter.from {
+        conditions.push("occurred_at >= ?".to_string());
+        bind_values.push(from.to_rfc3339());
+    }
+
+    if let Some(ref to) = filter.to {
+        conditions.push("occurred_at <= ?".to_string());
+        bind_values.push(to.to_rfc3339());
+    }
+
+    let where_clause = conditions.join(" AND ");
+
+    // Count total
+    let count_sql = format!("SELECT COUNT(*) FROM activity_log WHERE {}", where_clause);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for val in &bind_values {
+        count_query = count_query.bind(val);
+    }
+    let total: i64 = count_query.fetch_one(&state.pool).await?;
+
+    // Fetch page
+    let select_sql = format!(
+        "SELECT id, event_name, actor_id, subject_id, properties, occurred_at FROM activity_log WHERE {} ORDER BY occurred_at DESC LIMIT ? OFFSET ?",
+        where_clause
+    );
+    let mut select_query = sqlx::query(&select_sql);
+    for val in &bind_values {
+        select_query = select_query.bind(val);
+    }
+    select_query = select_query.bind(per_page).bind(offset);
+
+    let rows = select_query.fetch_all(&state.pool).await?;
+
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        let action: String = row.try_get("event_name").unwrap_or_default();
+        let actor_id_str: Option<String> = row.try_get("actor_id").ok();
+        let subject_id_str: Option<String> = row.try_get("subject_id").ok();
+        let properties: Option<String> = row.try_get("properties").ok();
+        let occurred_at: chrono::DateTime<chrono::Utc> = row.try_get("occurred_at").unwrap_or_else(|_| chrono::Utc::now());
+
+        let actor_id = actor_id_str.as_ref().and_then(|s| uuid::Uuid::parse_str(s).ok());
+        let target_user_id = subject_id_str.as_ref().and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+        // Parse properties JSON for details
+        let details: serde_json::Value = properties
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(serde_json::Value::Null);
+
+        items.push(AuditLogEntry {
+            id,
+            action,
+            actor_id,
+            actor_name: None, // TODO: Join with users table for names
+            target_user_id,
+            target_user_name: None,
+            details,
+            created_at: occurred_at,
+        });
+    }
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("X-Total-Count", total.to_string().parse().unwrap());
+
+    Ok((headers, Json(PaginatedAuditLogs {
+        items,
+        total,
+        page,
+        per_page,
+    })))
 }

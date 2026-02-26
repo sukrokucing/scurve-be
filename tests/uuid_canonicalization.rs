@@ -2,25 +2,16 @@ use anyhow::Result;
 use axum::body::{self, Body};
 use axum::http::Request;
 use serde_json::json;
-use sqlx::SqlitePool;
-use tempfile::tempdir;
 use tower::util::ServiceExt; // for oneshot
 
 use s_curve::create_app;
 
+mod support;
+
 #[tokio::test]
 async fn uuid_storage_is_text_for_new_rows() -> Result<()> {
-    // create temp db and run migrations
-    let dir = tempdir()?;
-    let db_path = dir.path().join("test.db");
-    use sqlx::sqlite::SqliteConnectOptions;
-    let opts = SqliteConnectOptions::new()
-        .filename(db_path.as_path())
-        .create_if_missing(true);
-    let pool = SqlitePool::connect_with(opts).await?;
-
-    let migrator = sqlx::migrate::Migrator::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations")).await?;
-    migrator.run(&pool).await?;
+    let test_db = support::db::cloned_clean_db().await?;
+    let pool = test_db.pool.clone();
 
     // start app
     std::env::set_var("JWT_SECRET", "test-secret");

@@ -3,14 +3,18 @@ use axum::{
     http::{Request, StatusCode},
 };
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
 use s_curve::{app, jwt};
 
-#[sqlx::test]
-async fn test_project_plan_management(pool: SqlitePool) {
+mod support;
+
+#[tokio::test]
+async fn test_project_plan_management() {
+    let test_db = support::db::cloned_clean_db().await.unwrap();
+    let pool = test_db.pool.clone();
+
     std::env::set_var("JWT_SECRET", "test_secret");
     let app = app::create_app(pool.clone()).await.unwrap();
 

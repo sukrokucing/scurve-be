@@ -8,17 +8,20 @@ use axum::{
 use crate::app::AppState;
 use crate::errors::AppError;
 use crate::jwt::AuthUser;
-use uuid::Uuid;
 use super::{Principal, ResourceContext, DefaultPolicyEvaluator, PolicyEvaluator, AuthzMode};
 
 use axum::extract::State;
 
-/// Middleware to enforce a specific permission
-pub async fn require_permission(
-    permission: &'static str,
-    state: AppState,
-    auth_user: AuthUser,
-    params: std::collections::HashMap<String, String>,
+/// Dynamic authorization middleware that checks route_permissions table
+///
+/// This middleware:
+/// 1. Extracts the current request path and HTTP method
+/// 2. Looks up the required permission from the route_permissions cache
+/// 3. Checks if the authenticated user has that permission
+/// 4. Returns 403 if denied (in strict mode) or logs and allows (in advisory mode)
+pub async fn dynamic_authz(
+    State(state): State<AppState>,
+    auth: AuthUser,
     req: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
@@ -27,118 +30,79 @@ pub async fn require_permission(
         return Ok(next.run(req).await);
     }
 
-    // Load principal
-    let principal = Principal::load(auth_user.user_id, &state.pool)
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load principal: {}", e)))?;
+    let method = req.method().as_str();
+    let path = req.uri().path();
 
-    // Build resource context from path params
+    // Look up required permission from cache
+    let permission = state.route_permission_cache.get_permission(method, path).await;
+
+    match permission {
+        Some(perm) => {
+            // Load principal and check permission
+            let principal = Principal::load(auth.user_id, &state.pool)
+                .await
+                .map_err(|e| AppError::internal(format!("Failed to load principal: {}", e)))?;
+
+            // Build resource context from path (extract project_id if present)
+            let ctx = extract_resource_context(path);
+
+            let evaluator = DefaultPolicyEvaluator::new();
+            let allowed = evaluator.can(&principal, &perm, &ctx).await;
+
+            if allowed {
+                Ok(next.run(req).await)
+            } else {
+                tracing::warn!(
+                    user_id = %auth.user_id,
+                    permission = %perm,
+                    path = %path,
+                    method = %method,
+                    mode = ?mode,
+                    "Permission denied"
+                );
+
+                if mode == AuthzMode::Strict {
+                    Err(AppError::forbidden("Permission denied"))
+                } else {
+                    // Advisory mode: log but allow
+                    Ok(next.run(req).await)
+                }
+            }
+        }
+        None => {
+            // Route not in route_permissions table
+            tracing::warn!(
+                path = %path,
+                method = %method,
+                "Route not configured in route_permissions table"
+            );
+
+            if mode == AuthzMode::Strict {
+                // Deny by default for unconfigured routes
+                Err(AppError::forbidden("Route not configured"))
+            } else {
+                // Advisory/Off mode: allow
+                Ok(next.run(req).await)
+            }
+        }
+    }
+}
+
+/// Extract resource context from the request path
+fn extract_resource_context(path: &str) -> ResourceContext {
     let mut ctx = ResourceContext::new();
 
-    if let Some(pid) = params.get("project_id") {
-        ctx = ctx.with_project(pid);
-    }
-
-    if let Some(rid) = params.get("id") {
-        if let Ok(uuid) = uuid::Uuid::parse_str(rid) {
-            ctx = ctx.with_resource("any", uuid); // Guessing type
+    // Extract project_id from paths like /projects/{uuid}/...
+    let parts: Vec<&str> = path.split('/').collect();
+    for (i, part) in parts.iter().enumerate() {
+        if *part == "projects" {
+            if let Some(id) = parts.get(i + 1) {
+                if let Ok(_uuid) = uuid::Uuid::parse_str(id) {
+                    ctx = ctx.with_project(*id);
+                }
+            }
         }
     }
 
-    let evaluator = DefaultPolicyEvaluator::new();
-    let allowed = evaluator.can(&principal, permission, &ctx).await;
-
-    if allowed {
-        Ok(next.run(req).await)
-    } else {
-        tracing::warn!(
-            user_id = %auth_user.user_id,
-            permission = %permission,
-            mode = ?mode,
-            "Permission denied"
-        );
-
-        if mode == AuthzMode::Strict {
-            Err(AppError::forbidden("Permission denied"))
-        } else {
-            // Advisory mode: log but allow
-            Ok(next.run(req).await)
-        }
-    }
-}
-
-// Named middleware functions for use with from_fn_with_state
-// This avoids type inference issues with async closures
-
-macro_rules! define_require_middleware {
-    ($name:ident, $perm:expr) => {
-        pub async fn $name(
-            State(state): State<AppState>,
-            auth: AuthUser,
-            path: Option<axum::extract::Path<std::collections::HashMap<String, String>>>,
-            req: Request<Body>,
-            next: Next,
-        ) -> Result<Response, AppError> {
-            let params = path.map(|p| p.0).unwrap_or_default();
-            require_permission($perm, state, auth, params, req, next).await
-        }
-    };
-}
-
-use super::permissions;
-
-define_require_middleware!(require_project_view, permissions::PROJECT_VIEW);
-define_require_middleware!(require_project_create, permissions::PROJECT_CREATE);
-define_require_middleware!(require_project_update, permissions::PROJECT_UPDATE);
-define_require_middleware!(require_project_delete, permissions::PROJECT_DELETE);
-
-define_require_middleware!(require_task_view, permissions::TASK_VIEW);
-define_require_middleware!(require_task_create, permissions::TASK_CREATE);
-define_require_middleware!(require_task_update, permissions::TASK_UPDATE);
-define_require_middleware!(require_task_delete, permissions::TASK_DELETE);
-
-define_require_middleware!(require_progress_view, permissions::PROGRESS_VIEW);
-define_require_middleware!(require_progress_create, permissions::PROGRESS_CREATE);
-
-define_require_middleware!(require_role_view, permissions::ROLE_VIEW);
-define_require_middleware!(require_role_manage, permissions::ROLE_MANAGE);
-define_require_middleware!(require_permission_view, permissions::PERMISSION_VIEW);
-define_require_middleware!(require_permission_manage, permissions::PERMISSION_MANAGE);
-define_require_middleware!(require_user_view, permissions::USER_VIEW);
-define_require_middleware!(require_user_manage, permissions::USER_MANAGE);
-
-/// Helper for handlers to check permissions manually with full context
-#[allow(dead_code)]
-pub async fn check_permission(
-    user_id: Uuid,
-    permission: &str,
-    ctx: &ResourceContext,
-    state: &AppState,
-) -> Result<bool, AppError> {
-    let mode = AuthzMode::from_env();
-    if mode == AuthzMode::Off {
-        return Ok(true);
-    }
-
-    let principal = Principal::load(user_id, &state.pool)
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load principal: {}", e)))?;
-
-    let evaluator = DefaultPolicyEvaluator::new();
-    let allowed = evaluator.can(&principal, permission, ctx).await;
-
-    if !allowed {
-        tracing::warn!(
-            user_id = %user_id,
-            permission = %permission,
-            mode = ?mode,
-            "Permission denied"
-        );
-
-        if mode == AuthzMode::Strict {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
+    ctx
 }

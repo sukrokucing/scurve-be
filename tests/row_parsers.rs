@@ -1,11 +1,16 @@
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqlitePoolOptions;
 use uuid::Uuid;
 use chrono::Utc;
 
 use s_curve::db::row_parsers::{db_progress_from_row, db_task_from_row, db_project_from_row, db_user_from_row, db_project_plan_point_from_row};
 
 async fn setup_pool() -> SqlitePool {
-    SqlitePool::connect("sqlite::memory:").await.expect("connect")
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("connect")
 }
 
 #[tokio::test]

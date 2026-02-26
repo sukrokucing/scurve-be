@@ -5,3 +5,4 @@ pub mod progress;
 pub mod project_plan;
 pub mod dependency;
 pub mod rbac;
+pub mod audit_log;

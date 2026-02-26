@@ -5,27 +5,19 @@ use axum::{
     response::Response,
 };
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
 use tower::ServiceExt;
-use tempfile::tempdir;
 use s_curve::create_app;
+
+mod support;
 
 #[tokio::test]
 async fn test_password_reset_flow() -> Result<()> {
-    // 1. Setup Test Environment
-    let dir = tempdir().context("failed to create tempdir")?;
-    let db_path = dir.path().join("test_reset.db");
-    use sqlx::sqlite::SqliteConnectOptions;
-    let opts = SqliteConnectOptions::new()
-        .filename(db_path.as_path())
-        .create_if_missing(true);
-    let pool = SqlitePool::connect_with(opts).await?;
-
-    let migrator = sqlx::migrate::Migrator::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
-        .await?;
-    migrator.run(&pool).await?;
+    let test_db = support::db::cloned_clean_db().await?;
+    let pool = test_db.pool.clone();
 
     std::env::set_var("JWT_SECRET", "test-secret");
+    std::env::set_var("AUTH_RATE_PER_SECOND", "100");
+    std::env::set_var("AUTH_BURST_SIZE", "100");
     let app = create_app(pool.clone()).await?;
 
     // 2. Register User

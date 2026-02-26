@@ -5,14 +5,17 @@
 //! - Direct user permissions (with optional scope)
 //! - Super admin bypass
 //! - Configurable enforcement modes (off/advisory/strict)
+//! - Database-driven route-permission mappings
 
 mod evaluator;
 mod principal;
 pub mod layer;
+pub mod route_cache;
 
 // Re-export common items
 pub use evaluator::{DefaultPolicyEvaluator, PolicyEvaluator};
 pub use principal::{Principal, ResourceContext};
+pub use route_cache::RoutePermissionCache;
 
 use std::sync::OnceLock;
 
@@ -50,32 +53,8 @@ pub mod roles {
     pub const VIEWER: &str = "viewer";
 }
 
-/// Well-known permission names
+/// Well-known permission names (Generated from permissions.json)
+#[allow(dead_code)]
 pub mod permissions {
-    // Project
-    pub const PROJECT_CREATE: &str = "project.create";
-    pub const PROJECT_VIEW: &str = "project.view";
-    pub const PROJECT_UPDATE: &str = "project.update";
-    pub const PROJECT_DELETE: &str = "project.delete";
-
-    // Task
-    pub const TASK_CREATE: &str = "task.create";
-    pub const TASK_VIEW: &str = "task.view";
-    pub const TASK_UPDATE: &str = "task.update";
-    pub const TASK_DELETE: &str = "task.delete";
-
-    // Progress
-    pub const PROGRESS_CREATE: &str = "progress.create";
-    pub const PROGRESS_VIEW: &str = "progress.view";
-
-    // User
-    pub const USER_VIEW: &str = "user.view";
-    #[allow(dead_code)]
-    pub const USER_MANAGE: &str = "user.manage";
-
-    // RBAC
-    pub const ROLE_VIEW: &str = "role.view";
-    pub const ROLE_MANAGE: &str = "role.manage";
-    pub const PERMISSION_VIEW: &str = "permission.view";
-    pub const PERMISSION_MANAGE: &str = "permission.manage";
+    include!(concat!(env!("OUT_DIR"), "/permissions_generated.rs"));
 }
