@@ -5,6 +5,8 @@ use std::path::Path;
 fn main() {
     // Re-run if permissions.json changes
     println!("cargo:rerun-if-changed=permissions.json");
+    // Re-run if migrations change so `sqlx::migrate!()` embeds latest files
+    println!("cargo:rerun-if-changed=migrations");
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("permissions_generated.rs");
