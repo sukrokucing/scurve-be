@@ -48,7 +48,8 @@ pub async fn cloned_clean_db() -> Result<TestDb> {
 
     let opts = SqliteConnectOptions::new()
         .filename(&db_path)
-        .create_if_missing(false);
+        .create_if_missing(false)
+        .foreign_keys(false);
     let pool = SqlitePool::connect_with(opts).await?;
 
     reset_mutable_tables(&pool).await?;

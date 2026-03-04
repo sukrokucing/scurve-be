@@ -1,24 +1,42 @@
-use axum::extract::{Path, State, Query};
+use std::collections::HashSet;
+
+use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
+use axum::http::header::HeaderName;
 use chrono::Utc;
 use serde::Deserialize;
 use axum::http::StatusCode;
 use axum::Json;
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 use crate::db::{uuid_sql, row_parsers};
 
 use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
-use crate::models::task::{DbTask, Task, TaskCreateRequest, TaskUpdateRequest};
+use crate::models::task::{
+    DbTask, Task, TaskActivityEntry, TaskAssignee, TaskBatchDeleteRequest,
+    TaskBatchDeleteResponse, TaskCreateRequest, TaskUpdateRequest,
+};
 use crate::models::dependency::{TaskDependency, DependencyCreateRequest};
 use crate::models::progress::DbProgress;
 use crate::utils::{utc_now, normalize_to_midnight};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct TaskListQuery {
     pub progress: Option<bool>,
     pub task_id: Option<Uuid>,
+    pub q: Option<String>,
+    pub status: Option<String>,
+    pub assignee_id: Option<Uuid>,
+    pub start_from: Option<chrono::DateTime<Utc>>,
+    pub start_to: Option<chrono::DateTime<Utc>>,
+    pub due_from: Option<chrono::DateTime<Utc>>,
+    pub due_to: Option<chrono::DateTime<Utc>>,
+    pub sort_by: Option<String>,
+    pub sort_dir: Option<String>,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
 }
 #[utoipa::path(
     get,
@@ -27,9 +45,22 @@ pub struct TaskListQuery {
     params(
         ("project_id" = Uuid, Path, description = "Project id"),
         ("progress" = Option<bool>, Query, description = "Legacy compatibility flag. When true, task list response is empty; use /progress endpoints instead."),
-        ("task_id" = Option<Uuid>, Query, description = "Optional task filter used only with progress=true.")
+        ("task_id" = Option<Uuid>, Query, description = "Optional task filter used only with progress=true."),
+        ("q" = Option<String>, Query, description = "Title search keyword."),
+        ("status" = Option<String>, Query, description = "Filter by task status."),
+        ("assignee_id" = Option<Uuid>, Query, description = "Filter by assignee user id."),
+        ("start_from" = Option<String>, Query, description = "Filter tasks with start_date >= this RFC3339 timestamp."),
+        ("start_to" = Option<String>, Query, description = "Filter tasks with start_date <= this RFC3339 timestamp."),
+        ("due_from" = Option<String>, Query, description = "Filter tasks with due_date >= this RFC3339 timestamp."),
+        ("due_to" = Option<String>, Query, description = "Filter tasks with due_date <= this RFC3339 timestamp."),
+        ("sort_by" = Option<String>, Query, description = "Sort field: start_date, due_date, created_at, updated_at, title, status, progress."),
+        ("sort_dir" = Option<String>, Query, description = "Sort direction: asc or desc."),
+        ("page" = Option<u32>, Query, description = "Page number (1-based, default 1)."),
+        ("per_page" = Option<u32>, Query, description = "Items per page (default 50, max 100).")
     ),
-    responses((status = 200, description = "List tasks", body = [Task])),
+    responses((status = 200, description = "List tasks", body = [Task], headers(
+        ("X-Total-Count" = i64, description = "Total number of matching tasks")
+    ))),
     security(("bearerAuth" = []))
 )]
 pub async fn list_tasks(
@@ -37,7 +68,7 @@ pub async fn list_tasks(
     Path(project_id): Path<Uuid>,
     Query(query): Query<TaskListQuery>,
     auth: AuthUser,
-) -> AppResult<Json<Vec<Task>>> {
+) -> AppResult<(HeaderMap, Json<Vec<Task>>)> {
     // If caller requested progress via query param, return progress entries instead
     if query.progress.unwrap_or(false) {
         // verify project membership
@@ -116,30 +147,93 @@ pub async fn list_tasks(
         // But to avoid breaking the signature, we'll return an empty task list when progress=true — caller should use the progress endpoints.
         // For now, return an empty Vec<Task> as placeholder.
         let tasks: Vec<Task> = Vec::new();
-        return Ok(Json(tasks));
+        let mut headers = HeaderMap::new();
+        headers.insert(HeaderName::from_static("x-total-count"), "0".parse().unwrap());
+        return Ok((headers, Json(tasks)));
     }
 
     ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(50).clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    let sort_by = resolve_sort_column(query.sort_by.as_deref())?;
+    let sort_dir = match query.sort_dir.as_deref() {
+        Some(v) if v.eq_ignore_ascii_case("desc") => "DESC",
+        _ => "ASC",
+    };
+
+    let match_proj = uuid_sql::match_uuid_clause("t.project_id");
+    let mut conditions = vec![match_proj, "t.deleted_at IS NULL".to_string()];
+    let mut binds: Vec<String> = vec![project_id.to_string(), project_id.to_string()];
+
+    if let Some(q) = query.q {
+        conditions.push("LOWER(t.title) LIKE LOWER(?)".to_string());
+        binds.push(format!("%{}%", q));
+    }
+
+    if let Some(status) = query.status {
+        conditions.push("t.status = ?".to_string());
+        binds.push(status);
+    }
+
+    if let Some(assignee_id) = query.assignee_id {
+        conditions.push(format!("({})", uuid_sql::match_uuid_clause("t.assignee")));
+        binds.push(assignee_id.to_string());
+        binds.push(assignee_id.to_string());
+    }
+
+    if let Some(start_from) = query.start_from {
+        conditions.push("t.start_date IS NOT NULL AND datetime(t.start_date) >= datetime(?)".to_string());
+        binds.push(start_from.to_rfc3339());
+    }
+
+    if let Some(start_to) = query.start_to {
+        conditions.push("t.start_date IS NOT NULL AND datetime(t.start_date) <= datetime(?)".to_string());
+        binds.push(start_to.to_rfc3339());
+    }
+
+    if let Some(due_from) = query.due_from {
+        conditions.push("t.due_date IS NOT NULL AND datetime(t.due_date) >= datetime(?)".to_string());
+        binds.push(due_from.to_rfc3339());
+    }
+
+    if let Some(due_to) = query.due_to {
+        conditions.push("t.due_date IS NOT NULL AND datetime(t.due_date) <= datetime(?)".to_string());
+        binds.push(due_to.to_rfc3339());
+    }
+
+    let where_clause = conditions.join(" AND ");
+
+    let count_sql = format!("SELECT COUNT(*) FROM tasks t WHERE {}", where_clause);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for bind in &binds {
+        count_query = count_query.bind(bind);
+    }
+    let total_count = count_query.fetch_one(&state.pool).await?;
 
     let id_case = uuid_sql::case_uuid("t.id");
     let project_case = uuid_sql::case_uuid("t.project_id");
     let assignee_case = uuid_sql::case_uuid("t.assignee");
     let parent_case = uuid_sql::case_uuid("t.parent_id");
-    let match_proj = uuid_sql::match_uuid_clause("t.project_id");
 
     let sql = format!(
         "SELECT {} , {} , t.title, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
          FROM tasks t \
-         WHERE {} AND t.deleted_at IS NULL \
-         ORDER BY t.start_date ASC, t.created_at DESC",
-        id_case, project_case, assignee_case, parent_case, match_proj
+         WHERE {} \
+         ORDER BY {} {} \
+         LIMIT ? OFFSET ?",
+        id_case, project_case, assignee_case, parent_case, where_clause, sort_by, sort_dir
     );
 
-    let rows = sqlx::query(&sql)
-        .bind(project_id.to_string())
-        .bind(project_id.to_string())
-        .fetch_all(&state.pool)
-        .await?;
+    let mut query_exec = sqlx::query(&sql);
+    for bind in &binds {
+        query_exec = query_exec.bind(bind);
+    }
+    query_exec = query_exec.bind(i64::from(per_page)).bind(i64::from(offset));
+
+    let rows = query_exec.fetch_all(&state.pool).await?;
 
     let mut tasks_rows = Vec::with_capacity(rows.len());
     for row in rows {
@@ -151,7 +245,13 @@ pub async fn list_tasks(
         .map(Task::try_from)
         .collect::<Result<_, _>>()?;
 
-    Ok(Json(tasks))
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-total-count"),
+        total_count.to_string().parse().unwrap(),
+    );
+
+    Ok((headers, Json(tasks)))
 }
 
 #[utoipa::path(
@@ -396,6 +496,121 @@ pub async fn delete_task(
 
 #[utoipa::path(
     get,
+    path = "/projects/{project_id}/assignees",
+    tag = "Tasks",
+    params(("project_id" = Uuid, Path, description = "Project id")),
+    responses((status = 200, description = "List assignees in project tasks", body = [TaskAssignee])),
+    security(("bearerAuth" = []))
+)]
+pub async fn list_project_assignees(
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+    auth: AuthUser,
+) -> AppResult<Json<Vec<TaskAssignee>>> {
+    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+
+    let assignee_case = uuid_sql::case_uuid("t.assignee");
+    let user_id_case = uuid_sql::case_uuid("u.id");
+    let match_proj = uuid_sql::match_uuid_clause("t.project_id");
+    let sql = format!(
+        "SELECT DISTINCT u.id, u.name, u.email
+         FROM (
+            SELECT DISTINCT {} FROM tasks t
+            WHERE {} AND t.assignee IS NOT NULL AND t.deleted_at IS NULL
+         ) ta
+         INNER JOIN (
+            SELECT {}, name, email, deleted_at FROM users u
+         ) u ON u.id = ta.assignee
+         WHERE u.deleted_at IS NULL
+         ORDER BY u.name ASC",
+        assignee_case, match_proj, user_id_case
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
+
+    let mut assignees = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id_s: String = row.try_get("id")?;
+        let id = Uuid::parse_str(&id_s)
+            .map_err(|e| AppError::internal(format!("invalid assignee uuid: {}", e)))?;
+        let name: String = row.try_get("name")?;
+        let email: String = row.try_get("email")?;
+        assignees.push(TaskAssignee { id, name, email });
+    }
+
+    Ok(Json(assignees))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project_id}/tasks/{id}/activity",
+    tag = "Tasks",
+    params(
+        ("project_id" = Uuid, Path, description = "Project id"),
+        ("id" = Uuid, Path, description = "Task id")
+    ),
+    responses((status = 200, description = "Task activity timeline", body = [TaskActivityEntry])),
+    security(("bearerAuth" = []))
+)]
+pub async fn list_task_activity(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((project_id, id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Vec<TaskActivityEntry>>> {
+    let _ = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+
+    let match_subject = uuid_sql::match_uuid_clause("subject_id");
+    let sql = format!(
+        "SELECT id, event_name, actor_id, properties, occurred_at
+         FROM activity_log
+         WHERE {} AND event_name LIKE 'task.%'
+         ORDER BY occurred_at DESC",
+        match_subject
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
+
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let event_id: String = row.try_get("id").unwrap_or_default();
+        let action: String = row.try_get("event_name").unwrap_or_default();
+        let actor_id = row
+            .try_get::<Option<String>, _>("actor_id")
+            .ok()
+            .flatten()
+            .and_then(|s| Uuid::parse_str(&s).ok());
+        let occurred_at: chrono::DateTime<chrono::Utc> = row
+            .try_get("occurred_at")
+            .unwrap_or_else(|_| chrono::Utc::now());
+        let details = row
+            .try_get::<Option<String>, _>("properties")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .unwrap_or(serde_json::Value::Null);
+
+        items.push(TaskActivityEntry {
+            id: event_id,
+            action,
+            actor_id,
+            occurred_at,
+            details,
+        });
+    }
+
+    Ok(Json(items))
+}
+
+#[utoipa::path(
+    get,
     path = "/projects/{project_id}/dependencies",
     tag = "Dependencies",
     params(("project_id" = Uuid, Path, description = "Project id")),
@@ -579,6 +794,72 @@ pub async fn delete_dependency(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/projects/{project_id}/tasks/batch",
+    tag = "Tasks",
+    params(("project_id" = Uuid, Path, description = "Project id")),
+    request_body = TaskBatchDeleteRequest,
+    responses((status = 200, description = "Tasks soft deleted", body = TaskBatchDeleteResponse)),
+    security(("bearerAuth" = []))
+)]
+pub async fn batch_delete_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+    Json(payload): Json<TaskBatchDeleteRequest>,
+) -> AppResult<Json<TaskBatchDeleteResponse>> {
+    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+
+    if payload.ids.is_empty() {
+        return Err(AppError::bad_request("ids must not be empty"));
+    }
+
+    let mut seen = HashSet::new();
+    let ids: Vec<Uuid> = payload
+        .ids
+        .into_iter()
+        .filter(|id| seen.insert(*id))
+        .collect();
+
+    let mut tx = state.pool.begin().await?;
+    let now = utc_now();
+    let mut deleted = 0usize;
+
+    for id in ids {
+        let match_id = uuid_sql::match_uuid_clause("id");
+        let match_proj = uuid_sql::match_uuid_clause("project_id");
+        let sql = format!(
+            "UPDATE tasks
+             SET deleted_at = ?, updated_at = ?
+             WHERE {} AND {} AND deleted_at IS NULL",
+            match_id, match_proj
+        );
+
+        let affected = sqlx::query(&sql)
+            .bind(now)
+            .bind(now)
+            .bind(id.to_string())
+            .bind(id.to_string())
+            .bind(project_id.to_string())
+            .bind(project_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+        if affected.rows_affected() == 0 {
+            return Err(AppError::not_found(format!(
+                "task {} not found in project",
+                id
+            )));
+        }
+
+        deleted += affected.rows_affected() as usize;
+    }
+
+    tx.commit().await?;
+    Ok(Json(TaskBatchDeleteResponse { deleted }))
+}
+
+#[utoipa::path(
     put,
     path = "/projects/{project_id}/tasks/batch",
     tag = "Tasks",
@@ -730,6 +1011,22 @@ pub async fn batch_update_tasks(
         .collect::<Result<_, _>>()?;
 
     Ok(Json(tasks))
+}
+
+fn resolve_sort_column(sort_by: Option<&str>) -> AppResult<&'static str> {
+    match sort_by.unwrap_or("start_date") {
+        "start_date" => Ok("COALESCE(t.start_date, t.created_at)"),
+        "due_date" => Ok("COALESCE(t.due_date, t.created_at)"),
+        "created_at" => Ok("t.created_at"),
+        "updated_at" => Ok("t.updated_at"),
+        "title" => Ok("t.title"),
+        "status" => Ok("t.status"),
+        "progress" => Ok("t.progress"),
+        other => Err(AppError::bad_request(format!(
+            "unsupported sort_by '{}'",
+            other
+        ))),
+    }
 }
 
 async fn ensure_project_membership(pool: &SqlitePool, user_id: Uuid, project_id: Uuid) -> AppResult<()> {

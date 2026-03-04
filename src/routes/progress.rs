@@ -52,6 +52,46 @@ pub async fn list_progress(
     Ok(Json(items))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/{task_id}/progress",
+    tag = "Progress",
+    params(("task_id" = Uuid, Path, description = "Task id")),
+    responses((status = 200, description = "List progress entries by task id", body = [Progress])),
+    security(("bearerAuth" = []))
+)]
+pub async fn list_progress_by_task(
+    State(state): State<AppState>,
+    Path(task_id): Path<Uuid>,
+    auth: AuthUser,
+) -> AppResult<Json<Vec<Progress>>> {
+    ensure_task_belongs_to_user_by_task_id(&state.pool, auth.user_id, task_id).await?;
+
+    let id_case = uuid_sql::case_uuid("id");
+    let project_case = uuid_sql::case_uuid("project_id");
+    let task_case = uuid_sql::case_uuid("task_id");
+    let match_task = uuid_sql::match_uuid_clause("task_id");
+
+    let sql = format!(
+        "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE {} AND deleted_at IS NULL ORDER BY created_at DESC",
+        id_case, project_case, task_case, match_task
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(task_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
+
+    let mut parsed = Vec::with_capacity(rows.len());
+    for row in rows {
+        parsed.push(row_parsers::db_progress_from_row(&row)?);
+    }
+
+    let items = parsed.into_iter().map(Progress::try_from).collect::<Result<_, _>>()?;
+    Ok(Json(items))
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct ProgressFilter {
@@ -387,5 +427,32 @@ async fn ensure_task_belongs_to_user(pool: &SqlitePool, user_id: Uuid, project_i
         .await?;
 
     let _owner = owner_s.ok_or_else(|| AppError::not_found("task or project not found"))?;
+    Ok(())
+}
+
+async fn ensure_task_belongs_to_user_by_task_id(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    task_id: Uuid,
+) -> AppResult<()> {
+    let match_task = uuid_sql::match_uuid_clause("t.id");
+    let match_user = uuid_sql::match_uuid_clause("p.user_id");
+    let sql = format!(
+        "SELECT p.user_id
+         FROM projects p
+         INNER JOIN tasks t ON t.project_id = p.id
+         WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
+        match_task, match_user
+    );
+
+    let owner_s = sqlx::query_scalar::<_, String>(&sql)
+        .bind(task_id.to_string())
+        .bind(task_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await?;
+
+    let _owner = owner_s.ok_or_else(|| AppError::not_found("task not found"))?;
     Ok(())
 }

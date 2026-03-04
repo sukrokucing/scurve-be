@@ -110,10 +110,24 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
     assert_eq!(status, axum::http::StatusCode::CREATED);
 
     // List tasks
-    let query = TaskListQuery { progress: None, task_id: None };
+    let query = TaskListQuery {
+        progress: None,
+        task_id: None,
+        q: None,
+        status: None,
+        assignee_id: None,
+        start_from: None,
+        start_to: None,
+        due_from: None,
+        due_to: None,
+        sort_by: None,
+        sort_dir: None,
+        page: None,
+        per_page: None,
+    };
     let path = AxPath(project_id);
     let res = list_tasks(AxState(app_state.clone()), path, axum::extract::Query(query), auth).await?;
-    let tasks = res.0;
+    let tasks = res.1.0;
 
     assert_eq!(tasks.len(), 2);
     // Should be sorted by start_date ASC. Early Task (Sept) first, Updated Task (Nov) second.

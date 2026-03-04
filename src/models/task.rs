@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::FromRow;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -124,4 +125,31 @@ pub struct TaskBatchUpdateRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TaskBatchUpdatePayload {
     pub tasks: Vec<TaskBatchUpdateRequest>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TaskBatchDeleteRequest {
+    pub ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskBatchDeleteResponse {
+    pub deleted: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskAssignee {
+    pub id: Uuid,
+    pub name: String,
+    pub email: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskActivityEntry {
+    pub id: String,
+    pub action: String,
+    pub actor_id: Option<Uuid>,
+    pub occurred_at: DateTime<Utc>,
+    #[schema(value_type = Object)]
+    pub details: Value,
 }

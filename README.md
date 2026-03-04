@@ -142,9 +142,13 @@ Auth flow in Swagger:
 | GET/POST | `/projects` | Yes | List/create projects |
 | GET/PUT/DELETE | `/projects/{id}` | Yes | Read/update/delete project |
 | GET/POST | `/projects/{project_id}/tasks` | Yes | List/create tasks |
+| DELETE | `/projects/{project_id}/tasks/batch` | Yes | Soft-delete multiple tasks atomically |
 | PUT/DELETE | `/projects/{project_id}/tasks/{id}` | Yes | Update/delete task |
+| GET | `/projects/{project_id}/tasks/{id}/activity` | Yes | Task activity timeline |
+| GET | `/projects/{project_id}/assignees` | Yes | List distinct assignees used in project tasks |
 | GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | List/create progress |
 | PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | Update/delete progress |
+| GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
 | GET/POST/DELETE | `/rbac/...` | Yes | RBAC administration |
 
 ## Development & Tests

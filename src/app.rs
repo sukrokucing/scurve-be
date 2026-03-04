@@ -126,8 +126,10 @@ pub fn api_routes(state: AppState) -> Router {
     // Tasks are scoped to a project: /projects/:project_id/tasks
     let task_routes = Router::new()
         .route("/batch", put(tasks::batch_update_tasks))
+        .route("/batch", delete(tasks::batch_delete_tasks))
         .route("/", get(tasks::list_tasks))
         .route("/", post(tasks::create_task))
+        .route("/:id/activity", get(tasks::list_task_activity))
         .route("/:id", get(tasks::get_task))
         .route("/:id", put(tasks::update_task))
         .route("/:id", delete(tasks::delete_task));
@@ -155,14 +157,23 @@ pub fn api_routes(state: AppState) -> Router {
     let project_progress_routes = Router::new()
         .route("/", get(progress::list_project_progress));
 
+    let project_assignee_routes = Router::new()
+        .route("/", get(tasks::list_project_assignees));
+
+    // Backward-compatible route for task progress lookup without project_id in path.
+    let legacy_task_progress_routes = Router::new()
+        .route("/", get(progress::list_progress_by_task));
+
     // Protected routes (require authentication and authorization)
     let protected_routes = Router::new()
         .nest("/users", user_routes)
         .nest("/projects", project_routes)
+        .nest("/projects/:project_id/assignees", project_assignee_routes)
         .nest("/projects/:project_id/tasks", task_routes)
         .nest("/projects/:project_id/tasks/:task_id/progress", progress_routes)
         .nest("/projects/:project_id/progress", project_progress_routes)
         .nest("/projects/:project_id/dependencies", dependency_routes)
+        .nest("/tasks/:task_id/progress", legacy_task_progress_routes)
         .nest("/rbac", rbac::routes(state.clone()))
         // Apply authorization middleware only to protected routes
         .layer(from_fn_with_state(state.clone(), authz::layer::dynamic_authz));

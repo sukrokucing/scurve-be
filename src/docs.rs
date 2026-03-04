@@ -21,6 +21,10 @@ use crate::models;
 			models::task::Task,
 			models::task::TaskCreateRequest,
 			models::task::TaskUpdateRequest,
+			models::task::TaskBatchDeleteRequest,
+			models::task::TaskBatchDeleteResponse,
+			models::task::TaskAssignee,
+			models::task::TaskActivityEntry,
 			models::progress::Progress,
 			models::progress::ProgressCreateRequest,
 			models::progress::ProgressUpdateRequest,
@@ -80,11 +84,15 @@ use crate::models;
 		crate::routes::tasks::update_task,
 		crate::routes::tasks::delete_task,
 		crate::routes::tasks::batch_update_tasks,
+		crate::routes::tasks::batch_delete_tasks,
+		crate::routes::tasks::list_project_assignees,
+		crate::routes::tasks::list_task_activity,
 		crate::routes::tasks::list_dependencies,
 		crate::routes::tasks::create_dependency,
 		crate::routes::tasks::delete_dependency,
 
 		crate::routes::progress::list_progress,
+		crate::routes::progress::list_progress_by_task,
 		crate::routes::progress::list_project_progress,
 		crate::routes::progress::get_progress,
 		crate::routes::progress::create_progress,
@@ -362,6 +370,12 @@ fn apply_request_examples(operation: &mut Value) {
 			"#/components/schemas/ProjectUpdateRequest" => Some(json!({ "name": "Launch Planning v2", "theme_color": "#2ecc71" })),
 			"#/components/schemas/TaskCreateRequest" => Some(json!({ "title": "Define launch checklist", "status": "pending" })),
 			"#/components/schemas/TaskUpdateRequest" => Some(json!({ "title": "Define final checklist", "status": "in_progress", "progress": 65 })),
+			"#/components/schemas/TaskBatchDeleteRequest" => Some(json!({
+				"ids": [
+					"33333333-3333-4333-8333-333333333333",
+					"22222222-2222-4222-8222-222222222222"
+				]
+			})),
 			"#/components/schemas/ProjectPlanCreateRequest" => Some(json!({ "date": "2025-12-01T00:00:00Z", "planned_progress": 10 })),
 			"#/components/schemas/ProgressCreateRequest" => Some(json!({ "progress": 50, "note": "Halfway there" })),
 			"#/components/schemas/ProgressUpdateRequest" => Some(json!({ "progress": 75, "note": "Adjusted after review" })),
@@ -455,6 +469,26 @@ fn apply_response_examples(operation: &mut Value) {
 						"progress": 0,
 						"created_at": "2025-01-16T09:00:00Z",
 						"updated_at": "2025-01-16T09:00:00Z"
+					})),
+					"#/components/schemas/TaskBatchDeleteResponse" => Some(json!({
+						"deleted": 2
+					})),
+					"#/components/schemas/TaskAssignee" => Some(json!({
+						"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com"
+					})),
+					"#/components/schemas/TaskActivityEntry" => Some(json!({
+						"id": "evt_20250120_0002",
+						"action": "task.updated",
+						"actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"occurred_at": "2025-01-20T10:16:00Z",
+						"details": {
+							"payload": {
+								"old": { "title": "Define checklist" },
+								"new": { "title": "Define final checklist" }
+							}
+						}
 					})),
 					"#/components/schemas/CriticalPathResponse" => Some(json!({
 						"task_ids": [
