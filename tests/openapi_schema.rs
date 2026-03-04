@@ -24,5 +24,36 @@ fn openapi_has_task_timeline_fields() -> anyhow::Result<()> {
         assert!(props.contains_key(*k), "OpenAPI Task schema missing '{}'", k);
     }
 
-    Ok(())
+	Ok(())
+}
+
+#[test]
+fn openapi_has_task_list_sort_enums() -> anyhow::Result<()> {
+	let doc = s_curve::docs::build_openapi(8000)?;
+	let v = serde_json::to_value(&doc)?;
+
+	let schemas = v
+		.get("components")
+		.and_then(Value::as_object)
+		.and_then(|c| c.get("schemas"))
+		.and_then(Value::as_object)
+		.expect("components.schemas must exist");
+
+	let sort_by = schemas
+		.get("TaskSortBy")
+		.and_then(Value::as_object)
+		.and_then(|s| s.get("enum"))
+		.and_then(Value::as_array)
+		.expect("TaskSortBy enum must exist");
+	assert_eq!(sort_by.len(), 7);
+
+	let sort_dir = schemas
+		.get("TaskSortDir")
+		.and_then(Value::as_object)
+		.and_then(|s| s.get("enum"))
+		.and_then(Value::as_array)
+		.expect("TaskSortDir enum must exist");
+	assert_eq!(sort_dir, &vec![Value::String("asc".into()), Value::String("desc".into())]);
+
+	Ok(())
 }

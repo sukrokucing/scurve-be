@@ -25,6 +25,8 @@ use crate::models;
 			models::task::TaskBatchDeleteResponse,
 			models::task::TaskAssignee,
 			models::task::TaskActivityEntry,
+			crate::routes::tasks::TaskSortBy,
+			crate::routes::tasks::TaskSortDir,
 			models::progress::Progress,
 			models::progress::ProgressCreateRequest,
 			models::progress::ProgressUpdateRequest,

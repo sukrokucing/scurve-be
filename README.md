@@ -151,6 +151,31 @@ Auth flow in Swagger:
 | GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
 | GET/POST/DELETE | `/rbac/...` | Yes | RBAC administration |
 
+### Task List Query (`GET /projects/{project_id}/tasks`)
+
+Server-side filtering, sorting, and pagination parameters:
+
+| Query Param | Type | Notes |
+| --- | --- | --- |
+| `q` | string | Case-insensitive title keyword search |
+| `status` | string | Single status or comma-separated values (e.g. `todo,done`) |
+| `assignee_id` | UUID | Filter by assignee |
+| `start_from`, `start_to` | datetime/date | Accepts RFC3339 or `YYYY-MM-DD` |
+| `due_from`, `due_to` | datetime/date | Accepts RFC3339 or `YYYY-MM-DD` |
+| `sort_by` | string | `start_date`, `due_date`, `created_at`, `updated_at`, `title`, `status`, `progress` |
+| `sort_dir` | string | `asc` or `desc` (invalid value returns `400`) |
+| `page` | integer | 1-based page number, default `1` |
+| `per_page` | integer | Items per page, default `50`, max `100` |
+
+Pagination metadata:
+
+- Response header `X-Total-Count` contains total matching rows (before `LIMIT/OFFSET`).
+
+Legacy compatibility:
+
+- `progress=true` and optional `task_id` are legacy query params on this endpoint.
+- Prefer using dedicated progress endpoints for progress payloads.
+
 ## Development & Tests
 
 Test safety model:

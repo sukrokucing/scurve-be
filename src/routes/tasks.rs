@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::http::header::HeaderName;
-use chrono::Utc;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
 use axum::http::StatusCode;
 use axum::Json;
@@ -22,6 +22,25 @@ use crate::models::dependency::{TaskDependency, DependencyCreateRequest};
 use crate::models::progress::DbProgress;
 use crate::utils::{utc_now, normalize_to_midnight};
 
+#[derive(Debug, Deserialize, Clone, Copy, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskSortBy {
+    StartDate,
+    DueDate,
+    CreatedAt,
+    UpdatedAt,
+    Title,
+    Status,
+    Progress,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskSortDir {
+    Asc,
+    Desc,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct TaskListQuery {
     pub progress: Option<bool>,
@@ -29,12 +48,12 @@ pub struct TaskListQuery {
     pub q: Option<String>,
     pub status: Option<String>,
     pub assignee_id: Option<Uuid>,
-    pub start_from: Option<chrono::DateTime<Utc>>,
-    pub start_to: Option<chrono::DateTime<Utc>>,
-    pub due_from: Option<chrono::DateTime<Utc>>,
-    pub due_to: Option<chrono::DateTime<Utc>>,
-    pub sort_by: Option<String>,
-    pub sort_dir: Option<String>,
+    pub start_from: Option<String>,
+    pub start_to: Option<String>,
+    pub due_from: Option<String>,
+    pub due_to: Option<String>,
+    pub sort_by: Option<TaskSortBy>,
+    pub sort_dir: Option<TaskSortDir>,
     pub page: Option<u32>,
     pub per_page: Option<u32>,
 }
@@ -47,14 +66,14 @@ pub struct TaskListQuery {
         ("progress" = Option<bool>, Query, description = "Legacy compatibility flag. When true, task list response is empty; use /progress endpoints instead."),
         ("task_id" = Option<Uuid>, Query, description = "Optional task filter used only with progress=true."),
         ("q" = Option<String>, Query, description = "Title search keyword."),
-        ("status" = Option<String>, Query, description = "Filter by task status."),
+        ("status" = Option<String>, Query, description = "Filter by task status. Supports comma-separated values (e.g. todo,done)."),
         ("assignee_id" = Option<Uuid>, Query, description = "Filter by assignee user id."),
-        ("start_from" = Option<String>, Query, description = "Filter tasks with start_date >= this RFC3339 timestamp."),
-        ("start_to" = Option<String>, Query, description = "Filter tasks with start_date <= this RFC3339 timestamp."),
-        ("due_from" = Option<String>, Query, description = "Filter tasks with due_date >= this RFC3339 timestamp."),
-        ("due_to" = Option<String>, Query, description = "Filter tasks with due_date <= this RFC3339 timestamp."),
-        ("sort_by" = Option<String>, Query, description = "Sort field: start_date, due_date, created_at, updated_at, title, status, progress."),
-        ("sort_dir" = Option<String>, Query, description = "Sort direction: asc or desc."),
+        ("start_from" = Option<String>, Query, description = "Filter tasks with start_date >= this timestamp (RFC3339 or YYYY-MM-DD)."),
+        ("start_to" = Option<String>, Query, description = "Filter tasks with start_date <= this timestamp (RFC3339 or YYYY-MM-DD)."),
+        ("due_from" = Option<String>, Query, description = "Filter tasks with due_date >= this timestamp (RFC3339 or YYYY-MM-DD)."),
+        ("due_to" = Option<String>, Query, description = "Filter tasks with due_date <= this timestamp (RFC3339 or YYYY-MM-DD)."),
+        ("sort_by" = Option<TaskSortBy>, Query, description = "Sort field."),
+        ("sort_dir" = Option<TaskSortDir>, Query, description = "Sort direction."),
         ("page" = Option<u32>, Query, description = "Page number (1-based, default 1)."),
         ("per_page" = Option<u32>, Query, description = "Items per page (default 50, max 100).")
     ),
@@ -158,11 +177,8 @@ pub async fn list_tasks(
     let per_page = query.per_page.unwrap_or(50).clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let sort_by = resolve_sort_column(query.sort_by.as_deref())?;
-    let sort_dir = match query.sort_dir.as_deref() {
-        Some(v) if v.eq_ignore_ascii_case("desc") => "DESC",
-        _ => "ASC",
-    };
+    let sort_by = resolve_sort_column(query.sort_by)?;
+    let sort_dir = resolve_sort_dir(query.sort_dir)?;
 
     let match_proj = uuid_sql::match_uuid_clause("t.project_id");
     let mut conditions = vec![match_proj, "t.deleted_at IS NULL".to_string()];
@@ -173,9 +189,24 @@ pub async fn list_tasks(
         binds.push(format!("%{}%", q));
     }
 
-    if let Some(status) = query.status {
-        conditions.push("t.status = ?".to_string());
-        binds.push(status);
+    if let Some(status_raw) = query.status {
+        let statuses = split_csv_values(&status_raw);
+        if statuses.is_empty() {
+            return Err(AppError::bad_request("status must not be empty"));
+        }
+        if statuses.len() == 1 {
+            conditions.push("LOWER(t.status) = LOWER(?)".to_string());
+            binds.push(statuses[0].to_string());
+        } else {
+            let placeholders = std::iter::repeat("LOWER(?)")
+                .take(statuses.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("LOWER(t.status) IN ({})", placeholders));
+            for status in statuses {
+                binds.push(status.to_string());
+            }
+        }
     }
 
     if let Some(assignee_id) = query.assignee_id {
@@ -185,23 +216,27 @@ pub async fn list_tasks(
     }
 
     if let Some(start_from) = query.start_from {
+        let start_from = parse_filter_datetime("start_from", &start_from, DateBound::From)?;
         conditions.push("t.start_date IS NOT NULL AND datetime(t.start_date) >= datetime(?)".to_string());
-        binds.push(start_from.to_rfc3339());
+        binds.push(start_from);
     }
 
     if let Some(start_to) = query.start_to {
+        let start_to = parse_filter_datetime("start_to", &start_to, DateBound::To)?;
         conditions.push("t.start_date IS NOT NULL AND datetime(t.start_date) <= datetime(?)".to_string());
-        binds.push(start_to.to_rfc3339());
+        binds.push(start_to);
     }
 
     if let Some(due_from) = query.due_from {
+        let due_from = parse_filter_datetime("due_from", &due_from, DateBound::From)?;
         conditions.push("t.due_date IS NOT NULL AND datetime(t.due_date) >= datetime(?)".to_string());
-        binds.push(due_from.to_rfc3339());
+        binds.push(due_from);
     }
 
     if let Some(due_to) = query.due_to {
+        let due_to = parse_filter_datetime("due_to", &due_to, DateBound::To)?;
         conditions.push("t.due_date IS NOT NULL AND datetime(t.due_date) <= datetime(?)".to_string());
-        binds.push(due_to.to_rfc3339());
+        binds.push(due_to);
     }
 
     let where_clause = conditions.join(" AND ");
@@ -1013,20 +1048,59 @@ pub async fn batch_update_tasks(
     Ok(Json(tasks))
 }
 
-fn resolve_sort_column(sort_by: Option<&str>) -> AppResult<&'static str> {
-    match sort_by.unwrap_or("start_date") {
-        "start_date" => Ok("COALESCE(t.start_date, t.created_at)"),
-        "due_date" => Ok("COALESCE(t.due_date, t.created_at)"),
-        "created_at" => Ok("t.created_at"),
-        "updated_at" => Ok("t.updated_at"),
-        "title" => Ok("t.title"),
-        "status" => Ok("t.status"),
-        "progress" => Ok("t.progress"),
-        other => Err(AppError::bad_request(format!(
-            "unsupported sort_by '{}'",
-            other
-        ))),
+fn resolve_sort_column(sort_by: Option<TaskSortBy>) -> AppResult<&'static str> {
+    match sort_by.unwrap_or(TaskSortBy::StartDate) {
+        TaskSortBy::StartDate => Ok("COALESCE(t.start_date, t.created_at)"),
+        TaskSortBy::DueDate => Ok("COALESCE(t.due_date, t.created_at)"),
+        TaskSortBy::CreatedAt => Ok("t.created_at"),
+        TaskSortBy::UpdatedAt => Ok("t.updated_at"),
+        TaskSortBy::Title => Ok("t.title"),
+        TaskSortBy::Status => Ok("t.status"),
+        TaskSortBy::Progress => Ok("t.progress"),
     }
+}
+
+fn resolve_sort_dir(sort_dir: Option<TaskSortDir>) -> AppResult<&'static str> {
+    match sort_dir.unwrap_or(TaskSortDir::Asc) {
+        TaskSortDir::Asc => Ok("ASC"),
+        TaskSortDir::Desc => Ok("DESC"),
+    }
+}
+
+fn split_csv_values(raw: &str) -> Vec<&str> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .collect()
+}
+
+#[derive(Copy, Clone)]
+enum DateBound {
+    From,
+    To,
+}
+
+fn parse_filter_datetime(field: &str, value: &str, bound: DateBound) -> AppResult<String> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+        return Ok(dt.with_timezone(&Utc).to_rfc3339());
+    }
+
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        let dt = match bound {
+            DateBound::From => date
+                .and_hms_opt(0, 0, 0)
+                .expect("valid midnight datetime"),
+            DateBound::To => date
+                .and_hms_opt(23, 59, 59)
+                .expect("valid end-of-day datetime"),
+        };
+        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc).to_rfc3339());
+    }
+
+    Err(AppError::bad_request(format!(
+        "{} must be RFC3339 timestamp or YYYY-MM-DD",
+        field
+    )))
 }
 
 async fn ensure_project_membership(pool: &SqlitePool, user_id: Uuid, project_id: Uuid) -> AppResult<()> {

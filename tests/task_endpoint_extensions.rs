@@ -340,6 +340,59 @@ async fn task_list_filters_and_legacy_progress_route_work() -> Result<()> {
         .oneshot(
             Request::builder()
                 .method("GET")
+                .uri(format!(
+                    "/projects/{}/tasks?assignee_id={}&start_from=2025-01-02&start_to=2025-01-02&due_from=2025-01-10&due_to=2025-01-10",
+                    project_id, assignee
+                ))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let filtered: Vec<Value> = serde_json::from_slice(&body)?;
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0]["id"], task_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/projects/{}/tasks?status=todo,done&sort_by=title&sort_dir=asc",
+                    project_id
+                ))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let total = response
+        .headers()
+        .get("x-total-count")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(total, "3");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/projects/{}/tasks?sort_dir=down", project_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
                 .uri(format!("/tasks/{}/progress", task_id))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())?,

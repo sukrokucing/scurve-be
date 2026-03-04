@@ -23,6 +23,27 @@ fn operation_set(spec: &Value) -> BTreeSet<(String, String)> {
 	out
 }
 
+fn collect_schema_refs(v: &Value, out: &mut Vec<String>) {
+	match v {
+		Value::Object(map) => {
+			if let Some(Value::String(reference)) = map.get("$ref") {
+				if let Some(name) = reference.strip_prefix("#/components/schemas/") {
+					out.push(name.to_string());
+				}
+			}
+			for value in map.values() {
+				collect_schema_refs(value, out);
+			}
+		}
+		Value::Array(items) => {
+			for item in items {
+				collect_schema_refs(item, out);
+			}
+		}
+		_ => {}
+	}
+}
+
 #[test]
 fn committed_openapi_matches_generated_operations() -> anyhow::Result<()> {
 	let generated = serde_json::to_value(s_curve::docs::build_openapi(8000)?)?;
@@ -145,6 +166,34 @@ fn public_endpoints_are_explicitly_unauthenticated() -> anyhow::Result<()> {
 			security
 		);
 	}
+
+	Ok(())
+}
+
+#[test]
+fn generated_openapi_has_no_dangling_schema_refs() -> anyhow::Result<()> {
+	let generated = serde_json::to_value(s_curve::docs::build_openapi(8000)?)?;
+
+	let schema_obj = generated
+		.get("components")
+		.and_then(Value::as_object)
+		.and_then(|c| c.get("schemas"))
+		.and_then(Value::as_object)
+		.ok_or_else(|| anyhow::anyhow!("components.schemas missing"))?;
+
+	let mut refs = Vec::new();
+	collect_schema_refs(&generated, &mut refs);
+
+	let missing: Vec<String> = refs
+		.into_iter()
+		.filter(|r| !schema_obj.contains_key(r))
+		.collect();
+
+	assert!(
+		missing.is_empty(),
+		"dangling schema refs in generated OpenAPI: {:?}",
+		missing
+	);
 
 	Ok(())
 }

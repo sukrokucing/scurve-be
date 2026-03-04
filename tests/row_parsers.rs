@@ -57,6 +57,51 @@ async fn parse_progress_row_text_uuid() {
 }
 
 #[tokio::test]
+async fn parse_progress_row_numeric_timestamps_and_text_progress() {
+    let pool = setup_pool().await;
+    sqlx::query(
+        "CREATE TABLE task_progress (id TEXT, project_id TEXT, task_id TEXT, progress TEXT, note TEXT, created_at INTEGER, updated_at INTEGER, deleted_at INTEGER)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let id = Uuid::new_v4();
+    let project_id = Uuid::new_v4();
+    let task_id = Uuid::new_v4();
+    let created_epoch = 1_735_689_600_i64; // 2025-01-01T00:00:00Z
+    let updated_epoch_ms = 1_735_689_600_000_i64; // same instant in ms
+
+    sqlx::query("INSERT INTO task_progress (id, project_id, task_id, progress, note, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(id.to_string())
+        .bind(project_id.to_string())
+        .bind(task_id.to_string())
+        .bind("42")
+        .bind(Some("legacy format".to_string()))
+        .bind(created_epoch)
+        .bind(updated_epoch_ms)
+        .bind(Option::<i64>::None)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let row = sqlx::query("SELECT * FROM task_progress WHERE id = ?")
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let parsed = db_progress_from_row(&row).expect("parse");
+    assert_eq!(parsed.id, id);
+    assert_eq!(parsed.project_id, project_id);
+    assert_eq!(parsed.task_id, task_id);
+    assert_eq!(parsed.progress, 42);
+    assert_eq!(parsed.note.unwrap(), "legacy format");
+    assert_eq!(parsed.created_at.timestamp(), created_epoch);
+    assert_eq!(parsed.updated_at.timestamp_millis(), updated_epoch_ms);
+}
+
+#[tokio::test]
 async fn parse_task_row_text_uuid() {
     let pool = setup_pool().await;
     sqlx::query(

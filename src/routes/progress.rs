@@ -411,9 +411,10 @@ async fn ensure_task_belongs_to_user(pool: &SqlitePool, user_id: Uuid, project_i
     let match_proj = uuid_sql::match_uuid_clause("p.id");
     let match_task = uuid_sql::match_uuid_clause("t.id");
     let match_user = uuid_sql::match_uuid_clause("p.user_id");
+    let user_case = uuid_sql::case_uuid("p.user_id");
     let sql = format!(
-        "SELECT p.user_id FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-        match_proj, match_task, match_user
+        "SELECT {} FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
+        user_case, match_proj, match_task, match_user
     );
 
     let owner_s = sqlx::query_scalar::<_, String>(&sql)
@@ -437,12 +438,13 @@ async fn ensure_task_belongs_to_user_by_task_id(
 ) -> AppResult<()> {
     let match_task = uuid_sql::match_uuid_clause("t.id");
     let match_user = uuid_sql::match_uuid_clause("p.user_id");
+    let user_case = uuid_sql::case_uuid("p.user_id");
     let sql = format!(
-        "SELECT p.user_id
+        "SELECT {}
          FROM projects p
          INNER JOIN tasks t ON t.project_id = p.id
          WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-        match_task, match_user
+        user_case, match_task, match_user
     );
 
     let owner_s = sqlx::query_scalar::<_, String>(&sql)
