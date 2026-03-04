@@ -149,6 +149,7 @@ Auth flow in Swagger:
 | GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | List/create progress |
 | PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | Update/delete progress |
 | GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
+| POST | `/telemetry/events` | Yes | Ingest frontend telemetry batch (idempotent by `event_id`) |
 | GET/POST/DELETE | `/rbac/...` | Yes | RBAC administration |
 
 ### Task List Query (`GET /projects/{project_id}/tasks`)

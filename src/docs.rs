@@ -60,6 +60,11 @@ use crate::models;
 			crate::routes::auth::MessageResponse,
 			crate::models::audit_log::AuditLogEntry,
 			crate::models::audit_log::PaginatedAuditLogs,
+			crate::models::telemetry::TelemetryEventName,
+			crate::models::telemetry::TelemetryEventRequest,
+			crate::models::telemetry::TelemetryBatchRequest,
+			crate::models::telemetry::TelemetryIngestResponse,
+			crate::models::telemetry::TelemetryErrorResponse,
 		)
 	),
 	paths(
@@ -101,6 +106,7 @@ use crate::models;
 		crate::routes::progress::update_progress,
 		crate::routes::progress::delete_progress,
 		crate::routes::health::health,
+		crate::routes::telemetry::ingest_events,
 
 		crate::routes::rbac::list_roles,
 		crate::routes::rbac::create_role,
@@ -128,6 +134,7 @@ use crate::models;
 		(name = "Projects", description = "Project management"),
 		(name = "Tasks", description = "Task management"),
 		(name = "Progress", description = "Task progress entries"),
+		(name = "Telemetry", description = "Frontend telemetry ingestion"),
 		(name = "RBAC", description = "Role-Based Access Control"),
 		(name = "Users", description = "User management")
 	)

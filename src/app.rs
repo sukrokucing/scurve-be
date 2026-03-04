@@ -12,7 +12,7 @@ use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use crate::events::{self, EventBus};
 use crate::errors::AppError;
 use crate::jwt::JwtConfig;
-use crate::routes::{auth, projects, tasks, progress, health, rbac, users};
+use crate::routes::{auth, projects, tasks, progress, health, rbac, users, telemetry};
 use crate::authz::RoutePermissionCache;
 
 fn env_var_u32(name: &str, default: u32) -> u32 {
@@ -164,6 +164,9 @@ pub fn api_routes(state: AppState) -> Router {
     let legacy_task_progress_routes = Router::new()
         .route("/", get(progress::list_progress_by_task));
 
+    let telemetry_routes = Router::new()
+        .route("/events", post(telemetry::ingest_events));
+
     // Protected routes (require authentication and authorization)
     let protected_routes = Router::new()
         .nest("/users", user_routes)
@@ -174,6 +177,7 @@ pub fn api_routes(state: AppState) -> Router {
         .nest("/projects/:project_id/progress", project_progress_routes)
         .nest("/projects/:project_id/dependencies", dependency_routes)
         .nest("/tasks/:task_id/progress", legacy_task_progress_routes)
+        .nest("/telemetry", telemetry_routes)
         .nest("/rbac", rbac::routes(state.clone()))
         // Apply authorization middleware only to protected routes
         .layer(from_fn_with_state(state.clone(), authz::layer::dynamic_authz));

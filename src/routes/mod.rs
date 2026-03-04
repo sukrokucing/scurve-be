@@ -5,3 +5,4 @@ pub mod progress;
 pub mod health;
 pub mod rbac;
 pub mod users;
+pub mod telemetry;

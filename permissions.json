@@ -18,5 +18,7 @@
   { "name": "ROLE_VIEW", "value": "role.view" },
   { "name": "ROLE_MANAGE", "value": "role.manage" },
   { "name": "PERMISSION_VIEW", "value": "permission.view" },
-  { "name": "PERMISSION_MANAGE", "value": "permission.manage" }
+  { "name": "PERMISSION_MANAGE", "value": "permission.manage" },
+
+  { "name": "TELEMETRY_INGEST", "value": "telemetry.ingest" }
 ]
