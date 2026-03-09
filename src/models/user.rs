@@ -19,8 +19,12 @@ pub struct User {
 }
 
 impl crate::events::Loggable for User {
-    fn entity_type() -> &'static str { "user" }
-    fn subject_id(&self) -> Uuid { self.id }
+    fn entity_type() -> &'static str {
+        "user"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]

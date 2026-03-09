@@ -17,8 +17,12 @@ pub struct ProjectPlanPoint {
 }
 
 impl crate::events::Loggable for ProjectPlanPoint {
-    fn entity_type() -> &'static str { "project_plan" }
-    fn subject_id(&self) -> Uuid { self.id }
+    fn entity_type() -> &'static str {
+        "project_plan"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]

@@ -40,14 +40,22 @@ async fn test_critical_path_basic() -> anyhow::Result<()> {
         .bind(Uuid::new_v4().to_string()).bind(a.to_string()).bind(d.to_string()).execute(&pool).await?;
 
     // Setup App
+    use axum::extract::{Path as AxPath, State as AxState};
     use s_curve::app::AppState;
+    use s_curve::jwt::{AuthUser, JwtConfig};
     use s_curve::routes::projects::get_project_critical_path;
-    use s_curve::jwt::{JwtConfig, AuthUser};
-    use axum::extract::{State as AxState, Path as AxPath};
 
-    let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
+    let jwt = JwtConfig {
+        secret: std::sync::Arc::new(b"test-secret".to_vec()),
+        exp_hours: 24,
+    };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
+    let app_state = AppState::new(
+        pool.clone(),
+        jwt,
+        event_bus,
+        s_curve::authz::RoutePermissionCache::new(),
+    );
     let auth = AuthUser { user_id };
 
     // Call critical path endpoint

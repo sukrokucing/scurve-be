@@ -2,9 +2,9 @@ use anyhow::Result;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
+use s_curve::create_app;
 use serde_json::json;
 use tower::util::ServiceExt;
-use s_curve::create_app;
 
 mod support;
 
@@ -28,7 +28,11 @@ async fn auth_edge_cases() -> Result<()> {
         .header("content-type", "application/json")
         .body(Body::from(short_pass_body.to_string()))?;
     let resp: Response = app.clone().oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "Should fail with bad request for short password");
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "Should fail with bad request for short password"
+    );
 
     // 2. Register with valid user
     let valid_body = json!({
@@ -55,7 +59,11 @@ async fn auth_edge_cases() -> Result<()> {
         .header("content-type", "application/json")
         .body(Body::from(wrong_pass_body.to_string()))?;
     let resp: Response = app.clone().oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Should fail with unauthorized for wrong password");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Should fail with unauthorized for wrong password"
+    );
 
     // 4. Login with non-existent email
     let no_user_body = json!({
@@ -68,7 +76,11 @@ async fn auth_edge_cases() -> Result<()> {
         .header("content-type", "application/json")
         .body(Body::from(no_user_body.to_string()))?;
     let resp: Response = app.clone().oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Should fail with unauthorized for non-existent user");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Should fail with unauthorized for non-existent user"
+    );
 
     // 5. Access protected route without token
     let req = Request::builder()
@@ -76,7 +88,11 @@ async fn auth_edge_cases() -> Result<()> {
         .uri("/projects")
         .body(Body::empty())?;
     let resp: Response = app.clone().oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Should fail with unauthorized for missing token");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Should fail with unauthorized for missing token"
+    );
 
     Ok(())
 }

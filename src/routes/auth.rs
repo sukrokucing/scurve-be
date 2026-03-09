@@ -4,14 +4,12 @@ use axum::Json;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-
 use crate::app::AppState;
+use crate::db::row_parsers;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::user::{AuthResponse, DbUser, LoginRequest, RegisterRequest, User};
 use crate::utils::{hash_password, utc_now, verify_password};
-use crate::db::row_parsers;
-
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MessageResponse {
@@ -187,9 +185,9 @@ pub async fn forgot_password(
     State(state): State<AppState>,
     Json(payload): Json<ForgotPasswordRequest>,
 ) -> impl axum::response::IntoResponse {
-    use rand::Rng;
-    use sha2::{Sha256, Digest};
     use crate::utils::utc_now;
+    use rand::Rng;
+    use sha2::{Digest, Sha256};
 
     // Find user by email
     let user_row = sqlx::query("SELECT id FROM users WHERE email = ? AND deleted_at IS NULL")
@@ -233,9 +231,12 @@ pub async fn forgot_password(
     .await?;
 
     // In production, send email with raw_token. For dev, return it directly.
-    Ok((StatusCode::OK, Json(MessageResponse {
-        message: format!("Reset token (dev only): {}", raw_token),
-    })))
+    Ok((
+        StatusCode::OK,
+        Json(MessageResponse {
+            message: format!("Reset token (dev only): {}", raw_token),
+        }),
+    ))
 }
 
 // --- Reset Password ---
@@ -257,8 +258,8 @@ pub async fn reset_password(
     State(state): State<AppState>,
     Json(payload): Json<ResetPasswordRequest>,
 ) -> impl axum::response::IntoResponse {
-    use sha2::{Sha256, Digest};
     use crate::utils::{hash_password, utc_now};
+    use sha2::{Digest, Sha256};
 
     // Hash the provided token
     let mut hasher = Sha256::new();
@@ -300,17 +301,20 @@ pub async fn reset_password(
         .execute(&state.pool)
         .await?;
 
-    Ok((StatusCode::OK, Json(MessageResponse {
-        message: "Password reset successful".to_string(),
-    })))
+    Ok((
+        StatusCode::OK,
+        Json(MessageResponse {
+            message: "Password reset successful".to_string(),
+        }),
+    ))
 }
 
-
 async fn ensure_email_available(pool: &SqlitePool, email: &str) -> AppResult<()> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM users WHERE email = ? AND deleted_at IS NULL")
-        .bind(email)
-        .fetch_one(pool)
-        .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(1) FROM users WHERE email = ? AND deleted_at IS NULL")
+            .bind(email)
+            .fetch_one(pool)
+            .await?;
 
     if count > 0 {
         return Err(AppError::conflict("email already in use"));

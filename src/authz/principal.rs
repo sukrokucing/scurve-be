@@ -12,7 +12,40 @@ pub struct Principal {
     pub scoped_permissions: Vec<(String, Value)>,
 }
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
+
+fn decode_uuidish_text_column(row: &SqliteRow, column: &str) -> Result<String, sqlx::Error> {
+    if let Ok(value) = row.try_get::<String, _>(column) {
+        return Ok(value);
+    }
+
+    if let Ok(bytes) = row.try_get::<Vec<u8>, _>(column) {
+        if bytes.len() == 16 {
+            if let Ok(uuid) = Uuid::from_slice(&bytes) {
+                return Ok(uuid.to_string());
+            }
+        }
+
+        if let Ok(text) = String::from_utf8(bytes.clone()) {
+            return Ok(text);
+        }
+
+        return Err(sqlx::Error::Decode(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("column `{}` contains non-utf8 bytes", column),
+        ))));
+    }
+
+    if let Ok(value) = row.try_get::<i64, _>(column) {
+        return Ok(value.to_string());
+    }
+
+    if let Ok(value) = row.try_get::<f64, _>(column) {
+        return Ok(value.to_string());
+    }
+
+    row.try_get::<String, _>(column)
+}
 
 impl Principal {
     #[allow(dead_code)]
@@ -27,7 +60,7 @@ impl Principal {
 
     /// Load roles and permissions from the database for a given user
     pub async fn load(user_id: Uuid, pool: &SqlitePool) -> Result<Self, sqlx::Error> {
-        use crate::db::uuid_sql::match_uuid_clause;
+        use crate::db::uuid_sql::{case_uuid, match_uuid_clause};
 
         // 1. Load role names
         let role_match = match_uuid_clause("ur.user_id");
@@ -59,7 +92,8 @@ impl Principal {
             .bind(user_id.to_string())
             .fetch_all(pool)
             .await?;
-        let mut permissions: HashSet<String> = role_perm_rows.iter().map(|r| r.get("name")).collect();
+        let mut permissions: HashSet<String> =
+            role_perm_rows.iter().map(|r| r.get("name")).collect();
 
         // 3. Load direct permissions and scoped permissions
         let direct_match = match_uuid_clause("up.user_id");
@@ -90,6 +124,53 @@ impl Principal {
                 permissions.insert(name);
             } else {
                 scoped_permissions.push((name, scope));
+            }
+        }
+
+        // 4. Load project-scoped permissions from project member roles.
+        let member_user_match = match_uuid_clause("pm.user_id");
+        let member_project_case = case_uuid("pm.project_id");
+        let member_sql = format!(
+            r#"
+            SELECT
+                p.name,
+                {}
+            FROM project_members pm
+            INNER JOIN projects pr ON pr.id = pm.project_id
+            INNER JOIN role_permissions rp ON rp.role_id = pm.role_id
+            INNER JOIN permissions p ON p.id = rp.permission_id
+            WHERE {} AND pm.deleted_at IS NULL AND pr.deleted_at IS NULL
+            "#,
+            member_project_case, member_user_match
+        );
+
+        let member_perm_rows = sqlx::query(&member_sql)
+            .bind(user_id.to_string())
+            .bind(user_id.to_string())
+            .fetch_all(pool)
+            .await?;
+
+        let mut seen_scoped: HashSet<(String, String)> = scoped_permissions
+            .iter()
+            .filter_map(|(name, scope)| {
+                scope
+                    .get("project_id")
+                    .and_then(|v| v.as_str())
+                    .map(|project_id| (name.clone(), project_id.to_string()))
+            })
+            .collect();
+
+        for row in member_perm_rows {
+            let name: String = row.try_get("name")?;
+            let project_id = decode_uuidish_text_column(&row, "project_id")?;
+            let key = (name.clone(), project_id.clone());
+            if seen_scoped.insert(key) {
+                scoped_permissions.push((
+                    name,
+                    serde_json::json!({
+                        "project_id": project_id,
+                    }),
+                ));
             }
         }
 
@@ -132,12 +213,105 @@ impl Principal {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Principal;
+    use serde_json::json;
+    use sqlx::SqlitePool;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn load_handles_blob_project_id_for_project_members(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pool = SqlitePool::connect("sqlite::memory:").await?;
+
+        sqlx::query("CREATE TABLE roles (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            .execute(&pool)
+            .await?;
+        sqlx::query("CREATE TABLE user_roles (user_id BLOB, role_id TEXT NOT NULL)")
+            .execute(&pool)
+            .await?;
+        sqlx::query("CREATE TABLE permissions (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            .execute(&pool)
+            .await?;
+        sqlx::query(
+            "CREATE TABLE role_permissions (role_id TEXT NOT NULL, permission_id TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE user_permissions (user_id TEXT, permission_id TEXT NOT NULL, scope TEXT)",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("CREATE TABLE projects (id BLOB PRIMARY KEY, deleted_at TEXT)")
+            .execute(&pool)
+            .await?;
+        sqlx::query(
+            "CREATE TABLE project_members (
+                id TEXT PRIMARY KEY,
+                project_id BLOB NOT NULL,
+                user_id BLOB NOT NULL,
+                role_id TEXT NOT NULL,
+                deleted_at TEXT
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        let user_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let permission_id = Uuid::new_v4();
+
+        sqlx::query("INSERT INTO roles (id, name) VALUES (?, ?)")
+            .bind(role_id.to_string())
+            .bind("project_member")
+            .execute(&pool)
+            .await?;
+        sqlx::query("INSERT INTO permissions (id, name) VALUES (?, ?)")
+            .bind(permission_id.to_string())
+            .bind("tasks.read")
+            .execute(&pool)
+            .await?;
+        sqlx::query("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)")
+            .bind(role_id.to_string())
+            .bind(permission_id.to_string())
+            .execute(&pool)
+            .await?;
+
+        sqlx::query("INSERT INTO projects (id, deleted_at) VALUES (?, NULL)")
+            .bind(project_id.as_bytes().to_vec())
+            .execute(&pool)
+            .await?;
+
+        sqlx::query(
+            "INSERT INTO project_members (id, project_id, user_id, role_id, deleted_at) VALUES (?, ?, ?, ?, NULL)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(project_id.as_bytes().to_vec())
+        .bind(user_id.as_bytes().to_vec())
+        .bind(role_id.to_string())
+        .execute(&pool)
+        .await?;
+
+        let principal = Principal::load(user_id, &pool).await?;
+        assert!(principal.scoped_permissions.contains(&(
+            "tasks.read".to_string(),
+            json!({ "project_id": project_id.to_string() })
+        )));
+
+        Ok(())
+    }
+}
+
 /// Resource context for scoped permission checks
 #[derive(Debug, Clone, Default)]
 pub struct ResourceContext {
     pub resource_type: Option<String>,
     pub resource_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
+    pub allow_project_scoped_without_target: bool,
     #[allow(dead_code)]
     pub metadata: Option<Value>,
 }
@@ -150,6 +324,11 @@ impl ResourceContext {
     #[allow(dead_code)]
     pub fn with_project(mut self, project_id: impl ToString) -> Self {
         self.project_id = uuid::Uuid::parse_str(&project_id.to_string()).ok();
+        self
+    }
+
+    pub fn allow_project_scoped_without_target(mut self) -> Self {
+        self.allow_project_scoped_without_target = true;
         self
     }
 

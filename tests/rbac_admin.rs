@@ -8,9 +8,9 @@ use sqlx::SqlitePool;
 use tower::ServiceExt; // for oneshot
 use uuid::Uuid;
 
+use s_curve::authz::permissions;
 use s_curve::create_app;
 use s_curve::jwt::JwtConfig;
-use s_curve::authz::permissions;
 
 mod support;
 
@@ -19,7 +19,7 @@ async fn setup_app() -> Result<(axum::Router, SqlitePool, String, Uuid, support:
     let pool = test_db.pool.clone();
 
     std::env::set_var("JWT_SECRET", "test-secret-rbac-admin");
-     // Ensure strict mode is set so we get 403s
+    // Ensure strict mode is set so we get 403s
     std::env::set_var("AUTHZ_MODE", "strict");
 
     let app = create_app(pool.clone()).await?;
@@ -82,7 +82,8 @@ async fn test_rbac_admin_lifecycle() -> Result<()> {
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
-    let body: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
+    let body: Value =
+        serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
     let roles = body.as_array().context("expected array")?;
     assert!(roles.len() >= 1, "Should have seeded roles");
 
@@ -102,9 +103,13 @@ async fn test_rbac_admin_lifecycle() -> Result<()> {
         let status = resp.status();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await?;
         let body_str = String::from_utf8_lossy(&body);
-        panic!("Failed to create role: Status: {}, Body: {}", status, body_str);
+        panic!(
+            "Failed to create role: Status: {}, Body: {}",
+            status, body_str
+        );
     }
-    let created_role: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
+    let created_role: Value =
+        serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
     let role_id = created_role["id"].as_str().context("missing id")?;
 
     // 3. Assign Permission to Role
@@ -153,20 +158,34 @@ async fn test_rbac_admin_lifecycle() -> Result<()> {
     // Wait, that endpoint requires USER_VIEW. Admin has it.
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/rbac/users/{}/effective-permissions", target_user_id))
+        .uri(format!(
+            "/rbac/users/{}/effective-permissions",
+            target_user_id
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
-    let body: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
-    let perms = body["permissions"].as_array().context("expected permissions array")?;
+    let body: Value =
+        serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
+    let perms = body["permissions"]
+        .as_array()
+        .context("expected permissions array")?;
 
     // Should have PROJECT_VIEW
-    let has_perm = perms.iter().any(|p| p["name"].as_str() == Some(permissions::PROJECT_VIEW));
+    let has_perm = perms
+        .iter()
+        .any(|p| p["name"].as_str() == Some(permissions::PROJECT_VIEW));
     if !has_perm {
-        println!("Effective Permissions Response: {}", serde_json::to_string_pretty(&body).unwrap());
+        println!(
+            "Effective Permissions Response: {}",
+            serde_json::to_string_pretty(&body).unwrap()
+        );
     }
-    assert!(has_perm, "Target user should have inherited PROJECT_VIEW from Custom Role");
+    assert!(
+        has_perm,
+        "Target user should have inherited PROJECT_VIEW from Custom Role"
+    );
 
     Ok(())
 }

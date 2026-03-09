@@ -12,6 +12,8 @@ pub struct Task {
     pub id: Uuid,
     pub project_id: Uuid,
     pub title: String,
+    #[schema(example = "[Quick Add] Define launch checklist")]
+    pub description: String,
     pub status: String,
     pub due_date: Option<DateTime<Utc>>,
     #[schema(format = DateTime, example = "2025-10-01T09:00:00Z")]
@@ -28,8 +30,12 @@ pub struct Task {
 }
 
 impl crate::events::Loggable for Task {
-    fn entity_type() -> &'static str { "task" }
-    fn subject_id(&self) -> Uuid { self.id }
+    fn entity_type() -> &'static str {
+        "task"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -37,6 +43,7 @@ pub struct DbTask {
     pub id: Uuid,
     pub project_id: Uuid,
     pub title: String,
+    pub description: String,
     pub status: String,
     pub due_date: Option<DateTime<Utc>>,
     pub start_date: Option<DateTime<Utc>>,
@@ -58,6 +65,7 @@ impl TryFrom<DbTask> for Task {
             id: value.id,
             project_id: value.project_id,
             title: value.title,
+            description: value.description,
             status: value.status,
             due_date: value.due_date,
             start_date: value.start_date,
@@ -77,6 +85,8 @@ impl TryFrom<DbTask> for Task {
 pub struct TaskCreateRequest {
     #[schema(example = "Define launch checklist")]
     pub title: String,
+    #[schema(example = "[Quick Add] Define launch checklist")]
+    pub description: Option<String>,
     #[schema(example = "pending")]
     pub status: Option<String>,
     #[schema(format = DateTime, example = "2025-10-10T10:00:00Z")]
@@ -94,6 +104,7 @@ pub struct TaskCreateRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TaskUpdateRequest {
     pub title: Option<String>,
+    pub description: Option<String>,
     pub status: Option<String>,
     #[schema(format = DateTime, example = "2025-11-01T10:00:00Z")]
     pub due_date: Option<DateTime<Utc>>,

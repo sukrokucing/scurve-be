@@ -22,10 +22,20 @@ pub struct HealthResponse {
 )]
 pub async fn health(State(state): State<AppState>) -> AppResult<Json<HealthResponse>> {
     // Lightweight DB check
-    let db_check = query_scalar::<_, i64>("SELECT 1").fetch_one(&state.pool).await;
+    let db_check = query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await;
 
     match db_check {
-        Ok(_) => Ok(Json(HealthResponse { status: "ok", db_ok: true, db_error: None })),
-        Err(e) => Ok(Json(HealthResponse { status: "ok", db_ok: false, db_error: Some(e.to_string()) })),
+        Ok(_) => Ok(Json(HealthResponse {
+            status: "ok",
+            db_ok: true,
+            db_error: None,
+        })),
+        Err(e) => Ok(Json(HealthResponse {
+            status: "ok",
+            db_ok: false,
+            db_error: Some(e.to_string()),
+        })),
     }
 }

@@ -546,6 +546,90 @@
         ]
       }
     },
+    "/portfolio/s-curve/summary": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Get Portfolio S Curve Summary",
+        "description": "Get Portfolio S Curve Summary Handles `GET` requests for `/portfolio/s-curve/summary`. Requires bearer authentication.",
+        "operationId": "get_portfolio_s_curve_summary",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "description": "Metric type. Defaults to progress.",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SCurveMetric"
+                }
+              ],
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Portfolio S-curve summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSCurveSummaryResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "Get Portfolio S Curve Summary Handles `GET` requests for `/portfolio/s-curve/summary`. Requires bearer authentication.",
+        "operationId": "get_portfolio_s_curve_summary",
+        "parameters": [
+          {
+            "description": "Metric type. Defaults to progress.",
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SCurveMetric"
+                }
+              ],
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSCurveSummaryResponse"
+                }
+              }
+            },
+            "description": "Portfolio S-curve summary"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get Portfolio S Curve Summary",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/projects": {
       "get": {
         "tags": [
@@ -633,6 +717,44 @@
           }
         ]
       },
+      "get": {
+        "description": "List Projects Handles `GET` requests for `/projects`. Requires bearer authentication.",
+        "operationId": "list_projects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-01-15T10:00:00Z",
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "name": "Launch Planning",
+                    "theme_color": "#3498db",
+                    "updated_at": "2025-01-15T10:00:00Z",
+                    "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List projects"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List Projects",
+        "tags": [
+          "Projects"
+        ]
+      },
       "post": {
         "description": "Create Project Handles `POST` requests for `/projects`. Requires bearer authentication.",
         "operationId": "create_project",
@@ -677,44 +799,6 @@
           }
         ],
         "summary": "Create Project",
-        "tags": [
-          "Projects"
-        ]
-      },
-      "get": {
-        "description": "List Projects Handles `GET` requests for `/projects`. Requires bearer authentication.",
-        "operationId": "list_projects",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "created_at": "2025-01-15T10:00:00Z",
-                    "id": "44444444-4444-4444-8444-444444444444",
-                    "name": "Launch Planning",
-                    "theme_color": "#3498db",
-                    "updated_at": "2025-01-15T10:00:00Z",
-                    "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Project"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List projects"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List Projects",
         "tags": [
           "Projects"
         ]
@@ -1420,6 +1504,112 @@
         ]
       }
     },
+    "/projects/{id}/s-curve/health": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Get Project S Curve Health",
+        "description": "Get Project S Curve Health Handles `GET` requests for `/projects/{id}/s-curve/health`. Requires bearer authentication.",
+        "operationId": "get_project_s_curve_health",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "00000000-0000-0000-0000-000000000000"
+          },
+          {
+            "name": "metric",
+            "in": "query",
+            "description": "Metric type. Defaults to progress.",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SCurveMetric"
+                }
+              ],
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project S-curve health",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCurveHealthResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "Get Project S Curve Health Handles `GET` requests for `/projects/{id}/s-curve/health`. Requires bearer authentication.",
+        "operationId": "get_project_s_curve_health",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Metric type. Defaults to progress.",
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SCurveMetric"
+                }
+              ],
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCurveHealthResponse"
+                }
+              }
+            },
+            "description": "Project S-curve health"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get Project S Curve Health",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/projects/{project_id}/assignees": {
       "get": {
         "tags": [
@@ -1629,6 +1819,56 @@
           }
         ]
       },
+      "get": {
+        "description": "List Dependencies Handles `GET` requests for `/projects/{project_id}/dependencies`. Requires bearer authentication.",
+        "operationId": "list_dependencies",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-01-18T09:00:00Z",
+                    "id": "88888888-8888-4888-8888-888888888888",
+                    "source_task_id": "33333333-3333-4333-8333-333333333333",
+                    "target_task_id": "22222222-2222-4222-8222-222222222222",
+                    "type_": "finish_to_start"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskDependency"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List dependencies"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List Dependencies",
+        "tags": [
+          "Dependencies"
+        ]
+      },
       "post": {
         "description": "Create Dependency Handles `POST` requests for `/projects/{project_id}/dependencies`. Requires bearer authentication.",
         "operationId": "create_dependency",
@@ -1685,56 +1925,6 @@
           }
         ],
         "summary": "Create Dependency",
-        "tags": [
-          "Dependencies"
-        ]
-      },
-      "get": {
-        "description": "List Dependencies Handles `GET` requests for `/projects/{project_id}/dependencies`. Requires bearer authentication.",
-        "operationId": "list_dependencies",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "created_at": "2025-01-18T09:00:00Z",
-                    "id": "88888888-8888-4888-8888-888888888888",
-                    "source_task_id": "33333333-3333-4333-8333-333333333333",
-                    "target_task_id": "22222222-2222-4222-8222-222222222222",
-                    "type_": "finish_to_start"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TaskDependency"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List dependencies"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List Dependencies",
         "tags": [
           "Dependencies"
         ]
@@ -1823,6 +2013,272 @@
         "summary": "Delete Dependency",
         "tags": [
           "Dependencies"
+        ]
+      }
+    },
+    "/projects/{project_id}/members": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "List Project Members",
+        "description": "List Project Members Handles `GET` requests for `/projects/{project_id}/members`. Requires bearer authentication.",
+        "operationId": "list_project_members",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "00000000-0000-0000-0000-000000000000"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List active project members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectMember"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Create Project Member",
+        "description": "Create Project Member Handles `POST` requests for `/projects/{project_id}/members`. Requires bearer authentication.",
+        "operationId": "create_project_member",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "00000000-0000-0000-0000-000000000000"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectMemberCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Project member added or updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMember"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "List Project Members Handles `GET` requests for `/projects/{project_id}/members`. Requires bearer authentication.",
+        "operationId": "list_project_members",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectMember"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List active project members"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List Project Members",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "description": "Create Project Member Handles `POST` requests for `/projects/{project_id}/members`. Requires bearer authentication.",
+        "operationId": "create_project_member",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectMemberCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMember"
+                }
+              }
+            },
+            "description": "Project member added or updated"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create Project Member",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{project_id}/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Delete Project Member",
+        "description": "Delete Project Member Handles `DELETE` requests for `/projects/{project_id}/members/{user_id}`. Requires bearer authentication.",
+        "operationId": "delete_project_member",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "00000000-0000-0000-0000-000000000000"
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "00000000-0000-0000-0000-000000000000"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project member soft deleted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "description": "Delete Project Member Handles `DELETE` requests for `/projects/{project_id}/members/{user_id}`. Requires bearer authentication.",
+        "operationId": "delete_project_member",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "User id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project member soft deleted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete Project Member",
+        "tags": [
+          "Projects"
         ]
       }
     },
@@ -2926,6 +3382,64 @@
           }
         ]
       },
+      "get": {
+        "description": "Get Task Handles `GET` requests for `/projects/{project_id}/tasks/{id}`. Requires bearer authentication.",
+        "operationId": "get_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-01-16T09:00:00Z",
+                  "id": "33333333-3333-4333-8333-333333333333",
+                  "progress": 0,
+                  "project_id": "44444444-4444-4444-8444-444444444444",
+                  "status": "pending",
+                  "title": "Define checklist",
+                  "updated_at": "2025-01-16T09:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            },
+            "description": "Task detail"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get Task",
+        "tags": [
+          "Tasks"
+        ]
+      },
       "put": {
         "description": "Update Task Handles `PUT` requests for `/projects/{project_id}/tasks/{id}`. Requires bearer authentication.",
         "operationId": "update_task",
@@ -3037,64 +3551,6 @@
           }
         ],
         "summary": "Delete Task",
-        "tags": [
-          "Tasks"
-        ]
-      },
-      "get": {
-        "description": "Get Task Handles `GET` requests for `/projects/{project_id}/tasks/{id}`. Requires bearer authentication.",
-        "operationId": "get_task",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Task id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "created_at": "2025-01-16T09:00:00Z",
-                  "id": "33333333-3333-4333-8333-333333333333",
-                  "progress": 0,
-                  "project_id": "44444444-4444-4444-8444-444444444444",
-                  "status": "pending",
-                  "title": "Define checklist",
-                  "updated_at": "2025-01-16T09:00:00Z"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Task"
-                }
-              }
-            },
-            "description": "Task detail"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Get Task",
         "tags": [
           "Tasks"
         ]
@@ -3720,89 +4176,6 @@
           }
         ]
       },
-      "put": {
-        "description": "Update Progress Handles `PUT` requests for `/projects/{project_id}/tasks/{task_id}/progress/{id}`. Requires bearer authentication.",
-        "operationId": "update_progress",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Task id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Progress id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "note": "Adjusted after review",
-                "progress": 75
-              },
-              "schema": {
-                "$ref": "#/components/schemas/ProgressUpdateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "created_at": "2025-01-19T09:00:00Z",
-                  "id": "99999999-9999-4999-8999-999999999999",
-                  "note": "Execution started",
-                  "progress": 65,
-                  "project_id": "44444444-4444-4444-8444-444444444444",
-                  "task_id": "33333333-3333-4333-8333-333333333333",
-                  "updated_at": "2025-01-19T09:00:00Z"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Progress"
-                }
-              }
-            },
-            "description": "Progress updated"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Update Progress",
-        "tags": [
-          "Progress"
-        ]
-      },
       "delete": {
         "description": "Delete Progress Handles `DELETE` requests for `/projects/{project_id}/tasks/{task_id}/progress/{id}`. Requires bearer authentication.",
         "operationId": "delete_progress",
@@ -3921,6 +4294,89 @@
           }
         ],
         "summary": "Get Progress",
+        "tags": [
+          "Progress"
+        ]
+      },
+      "put": {
+        "description": "Update Progress Handles `PUT` requests for `/projects/{project_id}/tasks/{task_id}/progress/{id}`. Requires bearer authentication.",
+        "operationId": "update_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Progress id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "note": "Adjusted after review",
+                "progress": 75
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ProgressUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-01-19T09:00:00Z",
+                  "id": "99999999-9999-4999-8999-999999999999",
+                  "note": "Execution started",
+                  "progress": 65,
+                  "project_id": "44444444-4444-4444-8444-444444444444",
+                  "task_id": "33333333-3333-4333-8333-333333333333",
+                  "updated_at": "2025-01-19T09:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Progress"
+                }
+              }
+            },
+            "description": "Progress updated"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update Progress",
         "tags": [
           "Progress"
         ]
@@ -4279,6 +4735,43 @@
           }
         ]
       },
+      "get": {
+        "description": "List all permissions Handles `GET` requests for `/rbac/permissions`. Requires bearer authentication.",
+        "operationId": "list_permissions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "description": "View projects",
+                    "id": "66666666-6666-4666-8666-666666666666",
+                    "name": "project.view",
+                    "updated_at": "2025-01-01T00:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Permission"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List of permissions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List all permissions",
+        "tags": [
+          "RBAC"
+        ]
+      },
       "post": {
         "description": "Create a new permission Handles `POST` requests for `/rbac/permissions`. Requires bearer authentication.",
         "operationId": "create_permission",
@@ -4324,43 +4817,6 @@
           }
         ],
         "summary": "Create a new permission",
-        "tags": [
-          "RBAC"
-        ]
-      },
-      "get": {
-        "description": "List all permissions Handles `GET` requests for `/rbac/permissions`. Requires bearer authentication.",
-        "operationId": "list_permissions",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "created_at": "2025-01-01T00:00:00Z",
-                    "description": "View projects",
-                    "id": "66666666-6666-4666-8666-666666666666",
-                    "name": "project.view",
-                    "updated_at": "2025-01-01T00:00:00Z"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Permission"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List of permissions"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List all permissions",
         "tags": [
           "RBAC"
         ]
@@ -4453,43 +4909,6 @@
           }
         ]
       },
-      "get": {
-        "description": "List all roles Handles `GET` requests for `/rbac/roles`. Requires bearer authentication.",
-        "operationId": "list_roles",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "created_at": "2025-01-01T00:00:00Z",
-                    "description": "Full access",
-                    "id": "55555555-5555-4555-8555-555555555555",
-                    "name": "super_admin",
-                    "updated_at": "2025-01-01T00:00:00Z"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Role"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List of roles"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List all roles",
-        "tags": [
-          "RBAC"
-        ]
-      },
       "post": {
         "description": "Create a new role Handles `POST` requests for `/rbac/roles`. Requires bearer authentication.",
         "operationId": "create_role",
@@ -4535,6 +4954,43 @@
           }
         ],
         "summary": "Create a new role",
+        "tags": [
+          "RBAC"
+        ]
+      },
+      "get": {
+        "description": "List all roles Handles `GET` requests for `/rbac/roles`. Requires bearer authentication.",
+        "operationId": "list_roles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "description": "Full access",
+                    "id": "55555555-5555-4555-8555-555555555555",
+                    "name": "super_admin",
+                    "updated_at": "2025-01-01T00:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List of roles"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List all roles",
         "tags": [
           "RBAC"
         ]
@@ -5192,6 +5648,53 @@
           }
         ]
       },
+      "post": {
+        "description": "Grant a permission directly to a user Handles `POST` requests for `/rbac/users/{user_id}/permissions`. Requires bearer authentication.",
+        "operationId": "grant_permission_to_user",
+        "parameters": [
+          {
+            "description": "User ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "permission_id": "00000000-0000-0000-0000-000000000000",
+                "scope": {
+                  "project_id": "00000000-0000-0000-0000-000000000000"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/GrantPermissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Permission granted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Grant a permission directly to a user",
+        "tags": [
+          "RBAC"
+        ]
+      },
       "get": {
         "description": "Get direct permissions granted to a user Handles `GET` requests for `/rbac/users/{user_id}/permissions`. Requires bearer authentication.",
         "operationId": "get_user_permissions",
@@ -5240,53 +5743,6 @@
           }
         ],
         "summary": "Get direct permissions granted to a user",
-        "tags": [
-          "RBAC"
-        ]
-      },
-      "post": {
-        "description": "Grant a permission directly to a user Handles `POST` requests for `/rbac/users/{user_id}/permissions`. Requires bearer authentication.",
-        "operationId": "grant_permission_to_user",
-        "parameters": [
-          {
-            "description": "User ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "permission_id": "00000000-0000-0000-0000-000000000000",
-                "scope": {
-                  "project_id": "00000000-0000-0000-0000-000000000000"
-                }
-              },
-              "schema": {
-                "$ref": "#/components/schemas/GrantPermissionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Permission granted"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Grant a permission directly to a user",
         "tags": [
           "RBAC"
         ]
@@ -5387,6 +5843,50 @@
           }
         ]
       },
+      "post": {
+        "description": "Assign a role to a user Handles `POST` requests for `/rbac/users/{user_id}/roles`. Requires bearer authentication.",
+        "operationId": "assign_role_to_user",
+        "parameters": [
+          {
+            "description": "User ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "role_id": "00000000-0000-0000-0000-000000000000"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/AssignRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Role assigned"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Assign a role to a user",
+        "tags": [
+          "RBAC"
+        ]
+      },
       "get": {
         "description": "Get roles assigned to a user Handles `GET` requests for `/rbac/users/{user_id}/roles`. Requires bearer authentication.",
         "operationId": "get_user_roles",
@@ -5433,50 +5933,6 @@
           }
         ],
         "summary": "Get roles assigned to a user",
-        "tags": [
-          "RBAC"
-        ]
-      },
-      "post": {
-        "description": "Assign a role to a user Handles `POST` requests for `/rbac/users/{user_id}/roles`. Requires bearer authentication.",
-        "operationId": "assign_role_to_user",
-        "parameters": [
-          {
-            "description": "User ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "role_id": "00000000-0000-0000-0000-000000000000"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/AssignRoleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Role assigned"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Assign a role to a user",
         "tags": [
           "RBAC"
         ]
@@ -6036,6 +6492,64 @@
         ]
       }
     },
+    "/users/me/projects": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "List My Project Scopes",
+        "description": "List My Project Scopes Handles `GET` requests for `/users/me/projects`. Requires bearer authentication.",
+        "operationId": "list_my_project_scopes",
+        "responses": {
+          "200": {
+            "description": "Accessible projects with effective scoped permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MyProjectScopeSummary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "List My Project Scopes Handles `GET` requests for `/users/me/projects`. Requires bearer authentication.",
+        "operationId": "list_my_project_scopes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MyProjectScopeSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Accessible projects with effective scoped permissions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List My Project Scopes",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/users/{id}": {
       "put": {
         "tags": [
@@ -6144,6 +6658,50 @@
           }
         ]
       },
+      "delete": {
+        "description": "Soft-deletes a user by setting deleted_at. Requires `user.manage` permission.",
+        "operationId": "delete_user",
+        "parameters": [
+          {
+            "description": "User ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "message": "User deleted"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedResponse"
+                }
+              }
+            },
+            "description": "User deleted"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a user (admin)",
+        "tags": [
+          "Users"
+        ]
+      },
       "put": {
         "description": "Updates user details. Requires `user.manage` permission.",
         "operationId": "update_user",
@@ -6203,50 +6761,6 @@
           }
         ],
         "summary": "Update a user (admin)",
-        "tags": [
-          "Users"
-        ]
-      },
-      "delete": {
-        "description": "Soft-deletes a user by setting deleted_at. Requires `user.manage` permission.",
-        "operationId": "delete_user",
-        "parameters": [
-          {
-            "description": "User ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "message": "User deleted"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/DeletedResponse"
-                }
-              }
-            },
-            "description": "User deleted"
-          },
-          "404": {
-            "description": "User not found"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete a user (admin)",
         "tags": [
           "Users"
         ]
@@ -6579,6 +7093,38 @@
           }
         }
       },
+      "MyProjectScopeSummary": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "project_name",
+          "role_id",
+          "role_name",
+          "permissions"
+        ],
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role_name": {
+            "type": "string"
+          }
+        }
+      },
       "PaginatedAuditLogs": {
         "type": "object",
         "description": "Paginated response for audit logs",
@@ -6653,6 +7199,117 @@
           "name": {
             "type": "string",
             "example": "project.archive"
+          }
+        }
+      },
+      "PortfolioSCurveProjectSummary": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "project_name",
+          "rule_50_70_status",
+          "last_updated_at"
+        ],
+        "properties": {
+          "actual_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "elapsed_time_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "last_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "planned_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "rule_50_70_pass": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "rule_50_70_status": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "variance_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        }
+      },
+      "PortfolioSCurveSummaryResponse": {
+        "type": "object",
+        "required": [
+          "metric",
+          "project_count",
+          "lag_count",
+          "log_count",
+          "maturity_count",
+          "decline_count",
+          "projects"
+        ],
+        "properties": {
+          "avg_actual_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "avg_planned_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "avg_variance_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "decline_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lag_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "log_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maturity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "metric": {
+            "$ref": "#/components/schemas/SCurveMetric"
+          },
+          "project_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortfolioSCurveProjectSummary"
+            }
           }
         }
       },
@@ -6797,6 +7454,62 @@
             "type": "string",
             "example": "#3498db",
             "nullable": true
+          }
+        }
+      },
+      "ProjectMember": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "user_name",
+          "user_email",
+          "role_id",
+          "role_name",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role_name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_name": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectMemberCreateRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "role_id"
+        ],
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -6984,12 +7697,69 @@
           }
         }
       },
+      "SCurveHealthResponse": {
+        "type": "object",
+        "required": [
+          "metric",
+          "rule_50_70_status",
+          "last_updated_at"
+        ],
+        "properties": {
+          "actual_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "elapsed_time_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "last_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metric": {
+            "$ref": "#/components/schemas/SCurveMetric"
+          },
+          "planned_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "rule_50_70_pass": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "rule_50_70_status": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "variance_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        }
+      },
+      "SCurveMetric": {
+        "type": "string",
+        "enum": [
+          "progress",
+          "hours",
+          "cost"
+        ]
+      },
       "Task": {
         "type": "object",
         "required": [
           "id",
           "project_id",
           "title",
+          "description",
           "status",
           "progress",
           "created_at",
@@ -7009,6 +7779,10 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "example": "[Quick Add] Define launch checklist"
           },
           "due_date": {
             "type": "string",
@@ -7215,6 +7989,11 @@
             "format": "uuid",
             "nullable": true
           },
+          "description": {
+            "type": "string",
+            "example": "[Quick Add] Define launch checklist",
+            "nullable": true
+          },
           "due_date": {
             "type": "string",
             "format": "date-time",
@@ -7311,6 +8090,10 @@
           "assignee": {
             "type": "string",
             "format": "uuid",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
             "nullable": true
           },
           "due_date": {

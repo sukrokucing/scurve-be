@@ -8,8 +8,8 @@
 //! - Database-driven route-permission mappings
 
 mod evaluator;
-mod principal;
 pub mod layer;
+mod principal;
 pub mod route_cache;
 
 // Re-export common items
@@ -34,7 +34,11 @@ impl AuthzMode {
     pub fn from_env() -> Self {
         static MODE: OnceLock<AuthzMode> = OnceLock::new();
         *MODE.get_or_init(|| {
-            match std::env::var("AUTHZ_MODE").unwrap_or_default().to_lowercase().as_str() {
+            match std::env::var("AUTHZ_MODE")
+                .unwrap_or_default()
+                .to_lowercase()
+                .as_str()
+            {
                 "advisory" => AuthzMode::Advisory,
                 "strict" => AuthzMode::Strict,
                 _ => AuthzMode::Off,

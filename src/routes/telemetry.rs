@@ -27,7 +27,8 @@ pub async fn ingest_events(
     State(state): State<AppState>,
     auth: AuthUser,
     Json(payload): Json<TelemetryBatchRequest>,
-) -> Result<(StatusCode, Json<TelemetryIngestResponse>), (StatusCode, Json<TelemetryErrorResponse>)> {
+) -> Result<(StatusCode, Json<TelemetryIngestResponse>), (StatusCode, Json<TelemetryErrorResponse>)>
+{
     if payload.events.is_empty() || payload.events.len() > 20 {
         return Err(invalid_payload());
     }

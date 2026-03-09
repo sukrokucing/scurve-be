@@ -11,11 +11,11 @@ fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("permissions_generated.rs");
 
-    let permissions_json = fs::read_to_string("permissions.json")
-        .expect("Failed to read permissions.json");
+    let permissions_json =
+        fs::read_to_string("permissions.json").expect("Failed to read permissions.json");
 
-    let permissions: Vec<serde_json::Value> = serde_json::from_str(&permissions_json)
-        .expect("Failed to parse permissions.json");
+    let permissions: Vec<serde_json::Value> =
+        serde_json::from_str(&permissions_json).expect("Failed to parse permissions.json");
 
     let mut content = String::from("/// Generated permission constants\n");
 
@@ -24,7 +24,6 @@ fn main() {
         let value = perm["value"].as_str().unwrap();
         content.push_str(&format!("    pub const {}: &str = \"{}\";\n", name, value));
     }
-
 
     fs::write(&dest_path, content).expect("Failed to write permissions_generated.rs");
 }

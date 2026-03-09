@@ -30,16 +30,24 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
         .bind(task3_id.to_string()).bind(project_id.to_string()).execute(&pool).await?;
 
     // Setup App
-    use s_curve::app::AppState;
-    use s_curve::routes::tasks::{create_dependency, list_dependencies, delete_dependency};
-    use s_curve::models::dependency::DependencyCreateRequest;
-    use s_curve::jwt::{JwtConfig, AuthUser};
-    use axum::extract::{State as AxState, Path as AxPath};
+    use axum::extract::{Path as AxPath, State as AxState};
     use axum::Json as AxJson;
+    use s_curve::app::AppState;
+    use s_curve::jwt::{AuthUser, JwtConfig};
+    use s_curve::models::dependency::DependencyCreateRequest;
+    use s_curve::routes::tasks::{create_dependency, delete_dependency, list_dependencies};
 
-    let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
+    let jwt = JwtConfig {
+        secret: std::sync::Arc::new(b"test-secret".to_vec()),
+        exp_hours: 24,
+    };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
+    let app_state = AppState::new(
+        pool.clone(),
+        jwt,
+        event_bus,
+        s_curve::authz::RoutePermissionCache::new(),
+    );
     let auth = AuthUser { user_id };
 
     // 1. Create Dependency T1 -> T2
@@ -49,7 +57,13 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
         type_: "finish_to_start".to_string(),
     };
     let path = AxPath(project_id);
-    let (status, json) = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await?;
+    let (status, json) = create_dependency(
+        AxState(app_state.clone()),
+        path,
+        auth.clone(),
+        AxJson(payload),
+    )
+    .await?;
     assert_eq!(status, axum::http::StatusCode::CREATED);
     let dep_id = json.0.id;
 
@@ -58,7 +72,9 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
     let res = list_dependencies(AxState(app_state.clone()), path, auth.clone()).await?;
     let deps = res.0;
     // Debug: check raw table count
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies").fetch_one(&pool).await?;
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies")
+        .fetch_one(&pool)
+        .await?;
     println!("raw task_dependencies count = {}", total);
     let total_project: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies d INNER JOIN tasks t ON t.id = d.source_task_id WHERE t.project_id = ?").bind(project_id.to_string()).fetch_one(&pool).await?;
     println!("project task_dependencies count = {}", total_project);
@@ -75,7 +91,13 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
         type_: "finish_to_start".to_string(),
     };
     let path = AxPath(project_id);
-    let res = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await;
+    let res = create_dependency(
+        AxState(app_state.clone()),
+        path,
+        auth.clone(),
+        AxJson(payload),
+    )
+    .await;
     assert!(res.is_err()); // Should fail with bad request
 
     // 3b. Test deeper cycle: create T2 -> T3, then attempt T3 -> T1 when T1->T2 exists
@@ -86,7 +108,13 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
         type_: "finish_to_start".to_string(),
     };
     let path = AxPath(project_id);
-    let (status, _json) = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await?;
+    let (status, _json) = create_dependency(
+        AxState(app_state.clone()),
+        path,
+        auth.clone(),
+        AxJson(payload),
+    )
+    .await?;
     assert_eq!(status, axum::http::StatusCode::CREATED);
 
     // Now attempt to create T3 -> T1 which would form a cycle T1->T2->T3->T1
@@ -96,7 +124,13 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
         type_: "finish_to_start".to_string(),
     };
     let path = AxPath(project_id);
-    let res = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await;
+    let res = create_dependency(
+        AxState(app_state.clone()),
+        path,
+        auth.clone(),
+        AxJson(payload),
+    )
+    .await;
     assert!(res.is_err()); // Should fail with deep cycle detection
 
     // 4. Try Self Dependency T1 -> T1
@@ -106,7 +140,13 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
         type_: "finish_to_start".to_string(),
     };
     let path = AxPath(project_id);
-    let res = create_dependency(AxState(app_state.clone()), path, auth.clone(), AxJson(payload)).await;
+    let res = create_dependency(
+        AxState(app_state.clone()),
+        path,
+        auth.clone(),
+        AxJson(payload),
+    )
+    .await;
     assert!(res.is_err());
 
     // 5. Delete Dependency

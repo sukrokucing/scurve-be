@@ -74,7 +74,9 @@ async fn test_project_plan_management() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let plan: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert_eq!(plan.len(), 2);
     assert_eq!(plan[0]["planned_progress"], 10);
@@ -95,7 +97,9 @@ async fn test_project_plan_management() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let dashboard: Value = serde_json::from_slice(&body).unwrap();
     let dashboard_plan = dashboard["plan"].as_array().unwrap();
     assert_eq!(dashboard_plan.len(), 2);
@@ -124,7 +128,9 @@ async fn test_project_plan_management() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let plan: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert_eq!(plan.len(), 1);
     assert_eq!(plan[0]["planned_progress"], 100);
@@ -159,7 +165,9 @@ async fn test_project_plan_management() {
         .await
         .unwrap();
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let dashboard: Value = serde_json::from_slice(&body).unwrap();
     let dashboard_plan = dashboard["plan"].as_array().unwrap();
     assert_eq!(dashboard_plan.len(), 0);

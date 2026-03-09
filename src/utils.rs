@@ -1,7 +1,7 @@
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use rand_core::OsRng;
 use chrono::{DateTime, Utc};
+use rand_core::OsRng;
 
 use crate::errors::AppError;
 

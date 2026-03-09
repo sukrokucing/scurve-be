@@ -3,10 +3,10 @@ use anyhow::Result;
 use axum::body::{self, Body};
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
+use chrono::Utc;
 use serde_json::json;
 use tower::util::ServiceExt; // for `oneshot`
 use uuid::Uuid;
-use chrono::Utc;
 
 use s_curve::create_app;
 
@@ -38,10 +38,18 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::CREATED {
-        panic!("register failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "register failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let auth_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let token = auth_res.get("token").and_then(|v| v.as_str()).context("missing token")?.to_string();
+    let token = auth_res
+        .get("token")
+        .and_then(|v| v.as_str())
+        .context("missing token")?
+        .to_string();
 
     // create project via API
     let project_body = json!({"name": "Dashboard Project"});
@@ -56,7 +64,11 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::CREATED {
-        panic!("project create failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "project create failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let _project_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
 
@@ -83,10 +95,18 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::CREATED {
-        panic!("task create failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "task create failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let task_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let task_id = task_res.get("id").and_then(|v| v.as_str()).context("missing task id")?.to_string();
+    let task_id = task_res
+        .get("id")
+        .and_then(|v| v.as_str())
+        .context("missing task id")?
+        .to_string();
 
     // insert two planned points directly into project_plan
     let now = Utc::now();
@@ -120,7 +140,10 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let prog_body = json!({"progress": 42, "note": "initial"});
     let req = Request::builder()
         .method("POST")
-        .uri(format!("/projects/{}/tasks/{}/progress", project_id, task_id))
+        .uri(format!(
+            "/projects/{}/tasks/{}/progress",
+            project_id, task_id
+        ))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", token))
         .body(Body::from(prog_body.to_string()))?;
@@ -143,15 +166,25 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::OK {
-        panic!("dashboard request failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "dashboard request failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
 
     let dash_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
     // check structure
     assert!(dash_res.get("project").is_some());
-    let plan = dash_res.get("plan").and_then(|v| v.as_array()).context("missing plan array")?;
+    let plan = dash_res
+        .get("plan")
+        .and_then(|v| v.as_array())
+        .context("missing plan array")?;
     assert_eq!(plan.len(), 2);
-    let actual = dash_res.get("actual").and_then(|v| v.as_array()).context("missing actual array")?;
+    let actual = dash_res
+        .get("actual")
+        .and_then(|v| v.as_array())
+        .context("missing actual array")?;
     assert!(actual.len() >= 1);
 
     Ok(())

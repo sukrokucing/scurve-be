@@ -35,7 +35,12 @@ async fn uuid_storage_is_text_for_new_rows() -> Result<()> {
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     assert_eq!(status.as_u16(), 201);
     let auth_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let _user_id = auth_res.get("user").and_then(|u| u.get("id")).and_then(|v| v.as_str()).unwrap().to_string();
+    let _user_id = auth_res
+        .get("user")
+        .and_then(|u| u.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     // verify users.id storage type by selecting the row by `email` (reliable text key)
     let row: (String,) = sqlx::query_as("SELECT typeof(id) FROM users WHERE email = ?")
@@ -45,7 +50,11 @@ async fn uuid_storage_is_text_for_new_rows() -> Result<()> {
     let user_type = row.0;
 
     // create a project
-    let token = auth_res.get("token").and_then(|v| v.as_str()).unwrap().to_string();
+    let token = auth_res
+        .get("token")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
     let project_body = json!({"name": "P1", "description": "d", "theme_color": "#000000"});
     let req = Request::builder()
         .method("POST")
@@ -59,7 +68,11 @@ async fn uuid_storage_is_text_for_new_rows() -> Result<()> {
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     assert_eq!(status.as_u16(), 201);
     let project_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let _project_id = project_res.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+    let _project_id = project_res
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     // verify projects.id storage type by selecting the row by `name` (reliable text key)
     let row: (String,) = sqlx::query_as("SELECT typeof(id) FROM projects WHERE name = ?")

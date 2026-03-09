@@ -25,8 +25,12 @@ pub struct AuditLogFilter {
     pub to: Option<DateTime<Utc>>,
 }
 
-fn default_page() -> i64 { 1 }
-fn default_per_page() -> i64 { 25 }
+fn default_page() -> i64 {
+    1
+}
+fn default_per_page() -> i64 {
+    25
+}
 
 /// A single audit log entry
 #[derive(Debug, Serialize, ToSchema)]

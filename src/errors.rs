@@ -103,10 +103,12 @@ impl IntoResponse for AppError {
         // Optionally include debug detail in the JSON response when
         // SHOW_ERRORS env var is set to `1` or `true`. This is intended
         // for local debugging only; avoid enabling in production.
-        let show = std::env::var("SHOW_ERRORS").map(|v| {
-            let v = v.to_ascii_lowercase();
-            v == "1" || v == "true" || v == "yes"
-        }).unwrap_or(false);
+        let show = std::env::var("SHOW_ERRORS")
+            .map(|v| {
+                let v = v.to_ascii_lowercase();
+                v == "1" || v == "true" || v == "yes"
+            })
+            .unwrap_or(false);
 
         let detail = if show {
             Some(format!("{:?}", self))

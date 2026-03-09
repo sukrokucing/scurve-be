@@ -17,7 +17,8 @@ pub struct JwtConfig {
 
 impl JwtConfig {
     pub fn from_env() -> Result<Self, AppError> {
-        let secret = std::env::var("JWT_SECRET").map_err(|_| AppError::configuration("JWT_SECRET not set"))?;
+        let secret = std::env::var("JWT_SECRET")
+            .map_err(|_| AppError::configuration("JWT_SECRET not set"))?;
         let exp_hours = std::env::var("JWT_EXP_HOURS")
             .map(|val| val.parse::<i64>())
             .unwrap_or(Ok(24))
@@ -41,8 +42,12 @@ impl JwtConfig {
             iat: now.timestamp() as usize,
         };
 
-        jsonwebtoken::encode(&Header::default(), &claims, &EncodingKey::from_secret(&self.secret))
-            .map_err(|err| AppError::token(err.to_string()))
+        jsonwebtoken::encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(&self.secret),
+        )
+        .map_err(|err| AppError::token(err.to_string()))
     }
 
     pub fn decode(&self, token: &str) -> Result<Claims, AppError> {
@@ -71,7 +76,10 @@ pub struct AuthUser {
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let token = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)

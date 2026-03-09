@@ -141,6 +141,9 @@ Auth flow in Swagger:
 | POST | `/auth/reset-password` | No | Reset password |
 | GET/POST | `/projects` | Yes | List/create projects |
 | GET/PUT/DELETE | `/projects/{id}` | Yes | Read/update/delete project |
+| GET | `/projects/{project_id}/members` | Yes | List active project members + role |
+| POST | `/projects/{project_id}/members` | Yes | Add/update project member role |
+| DELETE | `/projects/{project_id}/members/{user_id}` | Yes | Soft-delete project membership |
 | GET/POST | `/projects/{project_id}/tasks` | Yes | List/create tasks |
 | DELETE | `/projects/{project_id}/tasks/batch` | Yes | Soft-delete multiple tasks atomically |
 | PUT/DELETE | `/projects/{project_id}/tasks/{id}` | Yes | Update/delete task |
@@ -149,6 +152,9 @@ Auth flow in Swagger:
 | GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | List/create progress |
 | PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | Update/delete progress |
 | GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
+| GET | `/users/me/projects` | Yes | My accessible projects + effective scoped permissions |
+| GET | `/projects/{id}/s-curve/health` | Yes | S-curve health (`metric=progress|hours|cost`) |
+| GET | `/portfolio/s-curve/summary` | Yes | Portfolio-level S-curve summary |
 | POST | `/telemetry/events` | Yes | Ingest frontend telemetry batch (idempotent by `event_id`) |
 | GET/POST/DELETE | `/rbac/...` | Yes | RBAC administration |
 
@@ -176,6 +182,12 @@ Legacy compatibility:
 
 - `progress=true` and optional `task_id` are legacy query params on this endpoint.
 - Prefer using dedicated progress endpoints for progress payloads.
+
+### Task Description Rules
+
+- `Task`, `TaskCreateRequest`, and `TaskUpdateRequest` now include `description`.
+- On create, if `description` is missing/blank, backend auto-fills: `[Quick Add] {title}`.
+- On update, blank `description` is rejected with `400`.
 
 ## Development & Tests
 

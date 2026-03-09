@@ -95,7 +95,9 @@ async fn batch_delete_tasks_is_atomic() -> Result<()> {
                 .uri(format!("/projects/{}/tasks/batch", project_id))
                 .header("Authorization", format!("Bearer {}", token))
                 .header("Content-Type", "application/json")
-                .body(Body::from(json!({ "ids": [task1_id, task2_id] }).to_string()))?,
+                .body(Body::from(
+                    json!({ "ids": [task1_id, task2_id] }).to_string(),
+                ))?,
         )
         .await?;
 
@@ -237,7 +239,10 @@ async fn project_assignees_and_task_activity_endpoints_work() -> Result<()> {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/projects/{}/tasks/{}/activity", project_id, task_id))
+                .uri(format!(
+                    "/projects/{}/tasks/{}/activity",
+                    project_id, task_id
+                ))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())?,
         )

@@ -45,8 +45,10 @@ impl DefaultPolicyEvaluator {
                     return false;
                 }
             } else {
-                tracing::debug!(scope_project, "context missing project_id");
-                return false;
+                if !ctx.allow_project_scoped_without_target {
+                    tracing::debug!(scope_project, "context missing project_id");
+                    return false;
+                }
             }
         }
 
@@ -134,8 +136,7 @@ mod tests {
     #[tokio::test]
     async fn test_super_admin_bypasses_all() {
         let evaluator = DefaultPolicyEvaluator::new();
-        let principal = Principal::new(Uuid::new_v4())
-            .with_roles(vec!["super_admin".to_string()]);
+        let principal = Principal::new(Uuid::new_v4()).with_roles(vec!["super_admin".to_string()]);
         let ctx = ResourceContext::new();
 
         assert!(evaluator.can(&principal, "anything.at.all", &ctx).await);
@@ -144,8 +145,8 @@ mod tests {
     #[tokio::test]
     async fn test_direct_permission_allows() {
         let evaluator = DefaultPolicyEvaluator::new();
-        let principal = Principal::new(Uuid::new_v4())
-            .with_permissions(vec!["project.create".to_string()]);
+        let principal =
+            Principal::new(Uuid::new_v4()).with_permissions(vec!["project.create".to_string()]);
         let ctx = ResourceContext::new();
 
         assert!(evaluator.can(&principal, "project.create", &ctx).await);

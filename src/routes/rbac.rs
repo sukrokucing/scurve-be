@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, delete},
+    routing::{delete, get},
     Json, Router,
 };
 use chrono::Utc;
@@ -13,8 +13,8 @@ use crate::app::AppState;
 use crate::errors::AppError;
 use crate::events::{log_activity_with_context, RequestContext};
 use crate::jwt::AuthUser;
-use crate::models::rbac::*;
 use crate::models::audit_log::{AuditLogEntry, AuditLogFilter, PaginatedAuditLogs};
+use crate::models::rbac::*;
 
 // =============================================================================
 // ROUTER
@@ -25,20 +25,38 @@ pub fn routes(_state: AppState) -> Router<AppState> {
         // Roles
         .route("/roles", get(list_roles).post(create_role))
         .route("/roles/:role_id", get(get_role).delete(delete_role))
-        .route("/roles/:role_id/permissions", get(get_role_permissions).post(assign_permission_to_role))
+        .route(
+            "/roles/:role_id/permissions",
+            get(get_role_permissions).post(assign_permission_to_role),
+        )
         .route(
             "/roles/:role_id/permissions/:permission_id",
             delete(delete_permission_from_role),
         )
         // Permissions
-        .route("/permissions", get(list_permissions).post(create_permission))
+        .route(
+            "/permissions",
+            get(list_permissions).post(create_permission),
+        )
         // User role assignments
-        .route("/users/:user_id/roles", get(get_user_roles).post(assign_role_to_user))
-        .route("/users/:user_id/roles/:role_id", delete(revoke_role_from_user))
+        .route(
+            "/users/:user_id/roles",
+            get(get_user_roles).post(assign_role_to_user),
+        )
+        .route(
+            "/users/:user_id/roles/:role_id",
+            delete(revoke_role_from_user),
+        )
         // User direct permissions
-        .route("/users/:user_id/permissions", get(get_user_permissions).post(grant_permission_to_user))
+        .route(
+            "/users/:user_id/permissions",
+            get(get_user_permissions).post(grant_permission_to_user),
+        )
         // Effective permissions (computed)
-        .route("/users/:user_id/effective-permissions", get(get_effective_permissions))
+        .route(
+            "/users/:user_id/effective-permissions",
+            get(get_effective_permissions),
+        )
         // Audit logs
         .route("/audit-logs", get(list_audit_logs))
 }
@@ -63,19 +81,23 @@ async fn list_roles(
 ) -> Result<Json<Vec<Role>>, AppError> {
     use crate::db::uuid_sql::case_uuid;
     let id_case = case_uuid("id");
-    let sql = format!("SELECT {}, name, description, created_at, updated_at FROM roles ORDER BY name", id_case);
+    let sql = format!(
+        "SELECT {}, name, description, created_at, updated_at FROM roles ORDER BY name",
+        id_case
+    );
 
-    let rows = sqlx::query(&sql)
-    .fetch_all(&state.pool)
-    .await?;
+    let rows = sqlx::query(&sql).fetch_all(&state.pool).await?;
 
-    let roles: Vec<Role> = rows.iter().map(|r| Role {
-        id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
-        name: r.get("name"),
-        description: r.get("description"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
-    }).collect();
+    let roles: Vec<Role> = rows
+        .iter()
+        .map(|r| Role {
+            id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
+            name: r.get("name"),
+            description: r.get("description"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        })
+        .collect();
 
     Ok(Json(roles))
 }
@@ -102,7 +124,7 @@ async fn create_role(
     let now = Utc::now();
 
     sqlx::query(
-        "INSERT INTO roles (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO roles (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(&req.name)
@@ -154,14 +176,17 @@ async fn get_role(
     use crate::db::uuid_sql::{case_uuid, match_uuid_clause};
     let id_case = case_uuid("id");
     let match_clause = match_uuid_clause("id");
-    let sql = format!("SELECT {}, name, description, created_at, updated_at FROM roles WHERE {}", id_case, match_clause);
+    let sql = format!(
+        "SELECT {}, name, description, created_at, updated_at FROM roles WHERE {}",
+        id_case, match_clause
+    );
 
     let row = sqlx::query(&sql)
-    .bind(role_id.to_string())
-    .bind(role_id.to_string())
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::not_found("Role not found"))?;
+        .bind(role_id.to_string())
+        .bind(role_id.to_string())
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::not_found("Role not found"))?;
 
     let role = Role {
         id: Uuid::parse_str(row.get::<&str, _>("id")).unwrap_or_default(),
@@ -197,14 +222,17 @@ async fn delete_role(
     use crate::db::uuid_sql::{case_uuid, match_uuid_clause};
     let id_case = case_uuid("id");
     let match_clause = match_uuid_clause("id");
-    let fetch_sql = format!("SELECT {}, name, description, created_at, updated_at FROM roles WHERE {}", id_case, match_clause);
+    let fetch_sql = format!(
+        "SELECT {}, name, description, created_at, updated_at FROM roles WHERE {}",
+        id_case, match_clause
+    );
 
     let row = sqlx::query(&fetch_sql)
-    .bind(role_id.to_string())
-    .bind(role_id.to_string())
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::not_found("Role not found"))?;
+        .bind(role_id.to_string())
+        .bind(role_id.to_string())
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::not_found("Role not found"))?;
 
     let role = Role {
         id: Uuid::parse_str(row.get::<&str, _>("id")).unwrap_or_default(),
@@ -262,7 +290,10 @@ async fn assign_permission_to_role(
     let perm_match = match_uuid_clause("permission_id");
 
     // Check if it already exists using match clauses to be safe
-    let check_sql = format!("SELECT 1 FROM role_permissions WHERE {} AND {}", role_match, perm_match);
+    let check_sql = format!(
+        "SELECT 1 FROM role_permissions WHERE {} AND {}",
+        role_match, perm_match
+    );
     let existing = sqlx::query(&check_sql)
         .bind(role_id.to_string())
         .bind(role_id.to_string())
@@ -279,13 +310,13 @@ async fn assign_permission_to_role(
             match_role, match_perm
         );
         sqlx::query(&insert_sql)
-        .bind(role_id.to_string())
-        .bind(role_id.to_string())
-        .bind(req.permission_id.to_string())
-        .bind(req.permission_id.to_string())
-        .bind(now)
-        .execute(&state.pool)
-        .await?;
+            .bind(role_id.to_string())
+            .bind(role_id.to_string())
+            .bind(req.permission_id.to_string())
+            .bind(req.permission_id.to_string())
+            .bind(now)
+            .execute(&state.pool)
+            .await?;
     }
 
     let assignment = RolePermission {
@@ -340,18 +371,21 @@ async fn get_role_permissions(
     );
 
     let rows = sqlx::query(&sql)
-    .bind(role_id.to_string())
-    .bind(role_id.to_string())
-    .fetch_all(&state.pool)
-    .await?;
+        .bind(role_id.to_string())
+        .bind(role_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
-    let permissions: Vec<Permission> = rows.iter().map(|r| Permission {
-        id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
-        name: r.get("name"),
-        description: r.get("description"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
-    }).collect();
+    let permissions: Vec<Permission> = rows
+        .iter()
+        .map(|r| Permission {
+            id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
+            name: r.get("name"),
+            description: r.get("description"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        })
+        .collect();
 
     Ok(Json(permissions))
 }
@@ -381,7 +415,10 @@ async fn delete_permission_from_role(
 
     let role_match = match_uuid_clause("role_id");
     let perm_match = match_uuid_clause("permission_id");
-    let sql = format!("DELETE FROM role_permissions WHERE {} AND {}", role_match, perm_match);
+    let sql = format!(
+        "DELETE FROM role_permissions WHERE {} AND {}",
+        role_match, perm_match
+    );
 
     sqlx::query(&sql)
         .bind(role_id.to_string())
@@ -429,19 +466,23 @@ async fn list_permissions(
 ) -> Result<Json<Vec<Permission>>, AppError> {
     use crate::db::uuid_sql::case_uuid;
     let id_case = case_uuid("id");
-    let sql = format!("SELECT {}, name, description, created_at, updated_at FROM permissions ORDER BY name", id_case);
+    let sql = format!(
+        "SELECT {}, name, description, created_at, updated_at FROM permissions ORDER BY name",
+        id_case
+    );
 
-    let rows = sqlx::query(&sql)
-    .fetch_all(&state.pool)
-    .await?;
+    let rows = sqlx::query(&sql).fetch_all(&state.pool).await?;
 
-    let permissions: Vec<Permission> = rows.iter().map(|r| Permission {
-        id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
-        name: r.get("name"),
-        description: r.get("description"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
-    }).collect();
+    let permissions: Vec<Permission> = rows
+        .iter()
+        .map(|r| Permission {
+            id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
+            name: r.get("name"),
+            description: r.get("description"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        })
+        .collect();
 
     Ok(Json(permissions))
 }
@@ -536,18 +577,21 @@ async fn get_user_roles(
     );
 
     let rows = sqlx::query(&sql)
-    .bind(user_id.to_string())
-    .bind(user_id.to_string())
-    .fetch_all(&state.pool)
-    .await?;
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
-    let roles: Vec<Role> = rows.iter().map(|r| Role {
-        id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
-        name: r.get("name"),
-        description: r.get("description"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
-    }).collect();
+    let roles: Vec<Role> = rows
+        .iter()
+        .map(|r| Role {
+            id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
+            name: r.get("name"),
+            description: r.get("description"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        })
+        .collect();
 
     Ok(Json(roles))
 }
@@ -578,7 +622,10 @@ async fn assign_role_to_user(
 
     let user_match = match_uuid_clause("user_id");
     let role_match = match_uuid_clause("role_id");
-    let check_sql = format!("SELECT 1 FROM user_roles WHERE {} AND {}", user_match, role_match);
+    let check_sql = format!(
+        "SELECT 1 FROM user_roles WHERE {} AND {}",
+        user_match, role_match
+    );
 
     let existing = sqlx::query(&check_sql)
         .bind(user_id.to_string())
@@ -596,13 +643,13 @@ async fn assign_role_to_user(
             match_user, match_role
         );
         sqlx::query(&insert_sql)
-        .bind(user_id.to_string())
-        .bind(user_id.to_string())
-        .bind(req.role_id.to_string())
-        .bind(req.role_id.to_string())
-        .bind(now)
-        .execute(&state.pool)
-        .await?;
+            .bind(user_id.to_string())
+            .bind(user_id.to_string())
+            .bind(req.role_id.to_string())
+            .bind(req.role_id.to_string())
+            .bind(now)
+            .execute(&state.pool)
+            .await?;
     }
 
     let assignment = UserRole {
@@ -648,7 +695,10 @@ async fn revoke_role_from_user(
 
     let user_match = match_uuid_clause("user_id");
     let role_match = match_uuid_clause("role_id");
-    let sql = format!("DELETE FROM user_roles WHERE {} AND {}", user_match, role_match);
+    let sql = format!(
+        "DELETE FROM user_roles WHERE {} AND {}",
+        user_match, role_match
+    );
 
     sqlx::query(&sql)
         .bind(user_id.to_string())
@@ -714,21 +764,27 @@ async fn get_user_permissions(
     );
 
     let rows = sqlx::query(&sql)
-    .bind(user_id.to_string())
-    .bind(user_id.to_string())
-    .fetch_all(&state.pool)
-    .await?;
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
-    let permissions: Vec<UserPermission> = rows.iter().map(|r| {
-        let scope_str: Option<String> = r.get("scope");
-        UserPermission {
-            id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
-            user_id: Uuid::parse_str(r.get::<&str, _>("user_id")).unwrap_or_default(),
-            permission_id: Uuid::parse_str(r.get::<&str, _>("permission_id")).unwrap_or_default(),
-            scope: scope_str.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Object(Default::default())),
-            created_at: r.get("created_at"),
-        }
-    }).collect();
+    let permissions: Vec<UserPermission> = rows
+        .iter()
+        .map(|r| {
+            let scope_str: Option<String> = r.get("scope");
+            UserPermission {
+                id: Uuid::parse_str(r.get::<&str, _>("id")).unwrap_or_default(),
+                user_id: Uuid::parse_str(r.get::<&str, _>("user_id")).unwrap_or_default(),
+                permission_id: Uuid::parse_str(r.get::<&str, _>("permission_id"))
+                    .unwrap_or_default(),
+                scope: scope_str
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(Value::Object(Default::default())),
+                created_at: r.get("created_at"),
+            }
+        })
+        .collect();
 
     Ok(Json(permissions))
 }
@@ -756,7 +812,10 @@ async fn grant_permission_to_user(
 ) -> Result<StatusCode, AppError> {
     let id = Uuid::new_v4();
     let now = Utc::now();
-    let scope_val = req.scope.clone().unwrap_or(Value::Object(Default::default()));
+    let scope_val = req
+        .scope
+        .clone()
+        .unwrap_or(Value::Object(Default::default()));
     let scope_str = serde_json::to_string(&scope_val)
         .map_err(|e| AppError::bad_request(format!("Invalid scope JSON: {}", e)))?;
 
@@ -769,15 +828,15 @@ async fn grant_permission_to_user(
     );
 
     sqlx::query(&insert_sql)
-    .bind(id.to_string())
-    .bind(user_id.to_string())
-    .bind(user_id.to_string())
-    .bind(req.permission_id.to_string())
-    .bind(req.permission_id.to_string())
-    .bind(&scope_str)
-    .bind(now)
-    .execute(&state.pool)
-    .await?;
+        .bind(id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .bind(req.permission_id.to_string())
+        .bind(req.permission_id.to_string())
+        .bind(&scope_str)
+        .bind(now)
+        .execute(&state.pool)
+        .await?;
 
     let grant = UserPermission {
         id,
@@ -835,10 +894,10 @@ async fn get_effective_permissions(
         user_match
     );
     let role_rows = sqlx::query(&role_sql)
-    .bind(user_id.to_string())
-    .bind(user_id.to_string())
-    .fetch_all(&state.pool)
-    .await?;
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
     let roles: Vec<String> = role_rows.iter().map(|r| r.get("name")).collect();
 
@@ -855,10 +914,10 @@ async fn get_effective_permissions(
         user_match
     );
     let role_perm_rows = sqlx::query(&role_perm_sql)
-    .bind(user_id.to_string())
-    .bind(user_id.to_string())
-    .fetch_all(&state.pool)
-    .await?;
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
     // Fetch direct permissions
     let direct_match = match_uuid_clause("up.user_id");
@@ -872,10 +931,10 @@ async fn get_effective_permissions(
         direct_match
     );
     let direct_perm_rows = sqlx::query(&direct_sql)
-    .bind(user_id.to_string())
-    .bind(user_id.to_string())
-    .fetch_all(&state.pool)
-    .await?;
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_all(&state.pool)
+        .await?;
 
     let mut permissions: Vec<EffectivePermission> = Vec::new();
 
@@ -999,10 +1058,16 @@ pub async fn list_audit_logs(
         let actor_id_str: Option<String> = row.try_get("actor_id").ok();
         let subject_id_str: Option<String> = row.try_get("subject_id").ok();
         let properties: Option<String> = row.try_get("properties").ok();
-        let occurred_at: chrono::DateTime<chrono::Utc> = row.try_get("occurred_at").unwrap_or_else(|_| chrono::Utc::now());
+        let occurred_at: chrono::DateTime<chrono::Utc> = row
+            .try_get("occurred_at")
+            .unwrap_or_else(|_| chrono::Utc::now());
 
-        let actor_id = actor_id_str.as_ref().and_then(|s| uuid::Uuid::parse_str(s).ok());
-        let target_user_id = subject_id_str.as_ref().and_then(|s| uuid::Uuid::parse_str(s).ok());
+        let actor_id = actor_id_str
+            .as_ref()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok());
+        let target_user_id = subject_id_str
+            .as_ref()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
         // Parse properties JSON for details
         let details: serde_json::Value = properties
@@ -1024,10 +1089,13 @@ pub async fn list_audit_logs(
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("X-Total-Count", total.to_string().parse().unwrap());
 
-    Ok((headers, Json(PaginatedAuditLogs {
-        items,
-        total,
-        page,
-        per_page,
-    })))
+    Ok((
+        headers,
+        Json(PaginatedAuditLogs {
+            items,
+            total,
+            page,
+            per_page,
+        }),
+    ))
 }

@@ -1,26 +1,26 @@
 use std::collections::HashSet;
 
+use crate::db::{row_parsers, uuid_sql};
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
 use axum::http::header::HeaderName;
-use chrono::{DateTime, NaiveDate, Utc};
-use serde::Deserialize;
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::Json;
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
-use crate::db::{uuid_sql, row_parsers};
 
 use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
-use crate::models::task::{
-    DbTask, Task, TaskActivityEntry, TaskAssignee, TaskBatchDeleteRequest,
-    TaskBatchDeleteResponse, TaskCreateRequest, TaskUpdateRequest,
-};
-use crate::models::dependency::{TaskDependency, DependencyCreateRequest};
+use crate::models::dependency::{DependencyCreateRequest, TaskDependency};
 use crate::models::progress::DbProgress;
-use crate::utils::{utc_now, normalize_to_midnight};
+use crate::models::task::{
+    DbTask, Task, TaskActivityEntry, TaskAssignee, TaskBatchDeleteRequest, TaskBatchDeleteResponse,
+    TaskCreateRequest, TaskUpdateRequest,
+};
+use crate::utils::{normalize_to_midnight, utc_now};
 
 #[derive(Debug, Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -93,7 +93,7 @@ pub async fn list_tasks(
         // verify project membership
         ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
 
-    let _rows = if let Some(task_id) = query.task_id {
+        let _rows = if let Some(task_id) = query.task_id {
             // ensure task belongs to project
             let _ = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
             let simple = sqlx::query_as::<_, DbProgress>(
@@ -106,18 +106,18 @@ pub async fn list_tasks(
             match simple {
                 Ok(rows) => rows,
                 Err(_) => {
-                            let id_case = uuid_sql::case_uuid("id");
-                            let project_case = uuid_sql::case_uuid("project_id");
-                            let task_case = uuid_sql::case_uuid("task_id");
-                            let sql = format!(
+                    let id_case = uuid_sql::case_uuid("id");
+                    let project_case = uuid_sql::case_uuid("project_id");
+                    let task_case = uuid_sql::case_uuid("task_id");
+                    let sql = format!(
                                 "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
                                 id_case, project_case, task_case
                             );
 
-                            let rows = sqlx::query(&sql)
-                                .bind(task_id.to_string())
-                                .fetch_all(&state.pool)
-                                .await?;
+                    let rows = sqlx::query(&sql)
+                        .bind(task_id.to_string())
+                        .fetch_all(&state.pool)
+                        .await?;
 
                     let mut parsed = Vec::with_capacity(rows.len());
                     for row in rows {
@@ -159,15 +159,17 @@ pub async fn list_tasks(
                     parsed
                 }
             }
-        }
-    ;
+        };
 
         // Convert to Progress and then to Task-like JSON via serde Value? We will return empty Vec<Task> to satisfy signature
         // But to avoid breaking the signature, we'll return an empty task list when progress=true — caller should use the progress endpoints.
         // For now, return an empty Vec<Task> as placeholder.
         let tasks: Vec<Task> = Vec::new();
         let mut headers = HeaderMap::new();
-        headers.insert(HeaderName::from_static("x-total-count"), "0".parse().unwrap());
+        headers.insert(
+            HeaderName::from_static("x-total-count"),
+            "0".parse().unwrap(),
+        );
         return Ok((headers, Json(tasks)));
     }
 
@@ -217,25 +219,29 @@ pub async fn list_tasks(
 
     if let Some(start_from) = query.start_from {
         let start_from = parse_filter_datetime("start_from", &start_from, DateBound::From)?;
-        conditions.push("t.start_date IS NOT NULL AND datetime(t.start_date) >= datetime(?)".to_string());
+        conditions
+            .push("t.start_date IS NOT NULL AND datetime(t.start_date) >= datetime(?)".to_string());
         binds.push(start_from);
     }
 
     if let Some(start_to) = query.start_to {
         let start_to = parse_filter_datetime("start_to", &start_to, DateBound::To)?;
-        conditions.push("t.start_date IS NOT NULL AND datetime(t.start_date) <= datetime(?)".to_string());
+        conditions
+            .push("t.start_date IS NOT NULL AND datetime(t.start_date) <= datetime(?)".to_string());
         binds.push(start_to);
     }
 
     if let Some(due_from) = query.due_from {
         let due_from = parse_filter_datetime("due_from", &due_from, DateBound::From)?;
-        conditions.push("t.due_date IS NOT NULL AND datetime(t.due_date) >= datetime(?)".to_string());
+        conditions
+            .push("t.due_date IS NOT NULL AND datetime(t.due_date) >= datetime(?)".to_string());
         binds.push(due_from);
     }
 
     if let Some(due_to) = query.due_to {
         let due_to = parse_filter_datetime("due_to", &due_to, DateBound::To)?;
-        conditions.push("t.due_date IS NOT NULL AND datetime(t.due_date) <= datetime(?)".to_string());
+        conditions
+            .push("t.due_date IS NOT NULL AND datetime(t.due_date) <= datetime(?)".to_string());
         binds.push(due_to);
     }
 
@@ -254,7 +260,7 @@ pub async fn list_tasks(
     let parent_case = uuid_sql::case_uuid("t.parent_id");
 
     let sql = format!(
-        "SELECT {} , {} , t.title, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
+        "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
          FROM tasks t \
          WHERE {} \
          ORDER BY {} {} \
@@ -309,7 +315,11 @@ pub async fn create_task(
 
     let task_id = Uuid::new_v4();
     let now = utc_now();
-    let status = payload.status.clone().unwrap_or_else(|| "pending".to_string());
+    let status = payload
+        .status
+        .clone()
+        .unwrap_or_else(|| "pending".to_string());
+    let description = normalize_create_description(&payload.title, payload.description.as_deref());
 
     // Use original dates (removed normalization)
     let start_date = payload.start_date;
@@ -330,27 +340,28 @@ pub async fn create_task(
 
     let match_proj = uuid_sql::match_uuid_clause("id");
     let insert_sql = format!(
-        "INSERT INTO tasks (id, project_id, title, status, due_date, start_date, end_date, assignee, parent_id, progress, created_at, updated_at) \
-         VALUES (?, (SELECT id FROM projects WHERE {} AND deleted_at IS NULL), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (id, project_id, title, description, status, due_date, start_date, end_date, assignee, parent_id, progress, created_at, updated_at) \
+         VALUES (?, (SELECT id FROM projects WHERE {} AND deleted_at IS NULL), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         match_proj
     );
 
     sqlx::query(&insert_sql)
-    .bind(task_id.to_string())
-    .bind(project_id.to_string())
-    .bind(project_id.to_string())
-    .bind(&payload.title)
-    .bind(status)
-    .bind(payload.due_date)
-    .bind(start_date)
-    .bind(end_date)
-    .bind(payload.assignee.map(|id| id.to_string()))
-    .bind(payload.parent_id.map(|id| id.to_string()))
-    .bind(payload.progress.unwrap_or(0))
-    .bind(now)
-    .bind(now)
-    .execute(&state.pool)
-    .await?;
+        .bind(task_id.to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(&payload.title)
+        .bind(description)
+        .bind(status)
+        .bind(payload.due_date)
+        .bind(start_date)
+        .bind(end_date)
+        .bind(payload.assignee.map(|id| id.to_string()))
+        .bind(payload.parent_id.map(|id| id.to_string()))
+        .bind(payload.progress.unwrap_or(0))
+        .bind(now)
+        .bind(now)
+        .execute(&state.pool)
+        .await?;
 
     let task = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
     let task_dto: Task = task.clone().try_into()?;
@@ -393,6 +404,7 @@ pub async fn update_task(
 
     let TaskUpdateRequest {
         title,
+        description,
         status,
         due_date,
         start_date,
@@ -404,6 +416,12 @@ pub async fn update_task(
 
     if let Some(title) = title {
         task.title = title;
+    }
+    if let Some(description) = description {
+        if description.trim().is_empty() {
+            return Err(AppError::bad_request("description must not be empty"));
+        }
+        task.description = description;
     }
     if let Some(status) = status {
         task.status = status;
@@ -441,9 +459,10 @@ pub async fn update_task(
     let now = utc_now();
 
     sqlx::query(
-        "UPDATE tasks SET title = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, updated_at = ? WHERE id = ?",
+        "UPDATE tasks SET title = ?, description = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, updated_at = ? WHERE id = ?",
     )
     .bind(&task.title)
+    .bind(&task.description)
     .bind(&task.status)
     .bind(task.due_date)
     .bind(task.start_date)
@@ -510,7 +529,10 @@ pub async fn delete_task(
     let now = utc_now();
     let match_id = uuid_sql::match_uuid_clause("id");
     let match_proj = uuid_sql::match_uuid_clause("project_id");
-    let sql = format!("UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE {} AND {} AND deleted_at IS NULL", match_id, match_proj);
+    let sql = format!(
+        "UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE {} AND {} AND deleted_at IS NULL",
+        match_id, match_proj
+    );
 
     let affected = sqlx::query(&sql)
         .bind(now)
@@ -708,8 +730,20 @@ pub async fn create_dependency(
     ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
 
     // Validate tasks exist and belong to project
-    let _source = fetch_task(&state.pool, auth.user_id, project_id, payload.source_task_id).await?;
-    let _target = fetch_task(&state.pool, auth.user_id, project_id, payload.target_task_id).await?;
+    let _source = fetch_task(
+        &state.pool,
+        auth.user_id,
+        project_id,
+        payload.source_task_id,
+    )
+    .await?;
+    let _target = fetch_task(
+        &state.pool,
+        auth.user_id,
+        project_id,
+        payload.target_task_id,
+    )
+    .await?;
 
     if payload.source_task_id == payload.target_task_id {
         return Err(AppError::bad_request("Cannot link task to itself"));
@@ -718,18 +752,23 @@ pub async fn create_dependency(
     // Check for existing reverse link to prevent immediate cycle (A->B and B->A)
     let rev_source_match = uuid_sql::match_uuid_clause("source_task_id");
     let rev_target_match = uuid_sql::match_uuid_clause("target_task_id");
-    let reverse_sql = format!("SELECT EXISTS(SELECT 1 FROM task_dependencies WHERE {} AND {})", rev_source_match, rev_target_match);
+    let reverse_sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM task_dependencies WHERE {} AND {})",
+        rev_source_match, rev_target_match
+    );
 
     let reverse_exists: bool = sqlx::query_scalar(&reverse_sql)
-    .bind(payload.target_task_id.to_string())
-    .bind(payload.target_task_id.to_string())
-    .bind(payload.source_task_id.to_string())
-    .bind(payload.source_task_id.to_string())
-    .fetch_one(&state.pool)
-    .await?;
+        .bind(payload.target_task_id.to_string())
+        .bind(payload.target_task_id.to_string())
+        .bind(payload.source_task_id.to_string())
+        .bind(payload.source_task_id.to_string())
+        .fetch_one(&state.pool)
+        .await?;
 
     if reverse_exists {
-        return Err(AppError::bad_request("Cycle detected: reverse dependency already exists"));
+        return Err(AppError::bad_request(
+            "Cycle detected: reverse dependency already exists",
+        ));
     }
 
     // Detect deeper cycles using a recursive CTE.
@@ -746,15 +785,17 @@ pub async fn create_dependency(
     );
 
     let cycle_exists: bool = sqlx::query_scalar(&cycle_sql)
-    .bind(payload.target_task_id.to_string())
-    .bind(payload.target_task_id.to_string())
-    .bind(payload.source_task_id.to_string())
-    .bind(payload.source_task_id.to_string())
-    .fetch_one(&state.pool)
-    .await?;
+        .bind(payload.target_task_id.to_string())
+        .bind(payload.target_task_id.to_string())
+        .bind(payload.source_task_id.to_string())
+        .bind(payload.source_task_id.to_string())
+        .fetch_one(&state.pool)
+        .await?;
 
     if cycle_exists {
-        return Err(AppError::bad_request("Cycle detected: would create circular dependency"));
+        return Err(AppError::bad_request(
+            "Cycle detected: would create circular dependency",
+        ));
     }
 
     let id = Uuid::new_v4();
@@ -769,15 +810,15 @@ pub async fn create_dependency(
     );
 
     sqlx::query(&insert_sql)
-    .bind(id.to_string())
-    .bind(payload.source_task_id.to_string())
-    .bind(payload.source_task_id.to_string())
-    .bind(payload.target_task_id.to_string())
-    .bind(payload.target_task_id.to_string())
-    .bind(&payload.type_)
-    .bind(now)
-    .execute(&state.pool)
-    .await?;
+        .bind(id.to_string())
+        .bind(payload.source_task_id.to_string())
+        .bind(payload.source_task_id.to_string())
+        .bind(payload.target_task_id.to_string())
+        .bind(payload.target_task_id.to_string())
+        .bind(&payload.type_)
+        .bind(now)
+        .execute(&state.pool)
+        .await?;
 
     let dep = TaskDependency {
         id,
@@ -822,7 +863,9 @@ pub async fn delete_dependency(
         .await?;
 
     if affected.rows_affected() == 0 {
-        return Err(AppError::not_found("Dependency not found or not in project"));
+        return Err(AppError::not_found(
+            "Dependency not found or not in project",
+        ));
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -933,7 +976,10 @@ pub async fn batch_update_tasks(
             .await?;
 
         if !exists {
-            return Err(AppError::not_found(format!("Task {} not found in project", update.id)));
+            return Err(AppError::not_found(format!(
+                "Task {} not found in project",
+                update.id
+            )));
         }
 
         // Use manual select to handle TEXT UUIDs
@@ -944,7 +990,7 @@ pub async fn batch_update_tasks(
         let match_id = uuid_sql::match_uuid_clause("t.id");
 
         let sql = format!(
-            "SELECT {} , {} , t.title, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at FROM tasks t WHERE {}",
+            "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at FROM tasks t WHERE {}",
             id_case, proj_case, assignee_case, parent_case, match_id
         );
 
@@ -957,26 +1003,45 @@ pub async fn batch_update_tasks(
         let current = row_parsers::db_task_from_row(&row)?;
 
         // Use original dates (removed normalization)
-        let start = update.start_date.or(current.start_date.map(|d| d.with_timezone(&Utc)));
-        let end = update.end_date.or(current.end_date.map(|d| d.with_timezone(&Utc)));
+        let start = update
+            .start_date
+            .or(current.start_date.map(|d| d.with_timezone(&Utc)));
+        let end = update
+            .end_date
+            .or(current.end_date.map(|d| d.with_timezone(&Utc)));
 
         if let (Some(s), Some(e)) = (start, end) {
-             if e < s {
-                return Err(AppError::bad_request(format!("Task {}: end_date must be >= start_date", update.id)));
+            if e < s {
+                return Err(AppError::bad_request(format!(
+                    "Task {}: end_date must be >= start_date",
+                    update.id
+                )));
             }
         }
 
         if let Some(p) = update.progress {
-             if p < 0 || p > 100 {
-                return Err(AppError::bad_request(format!("Task {}: progress must be between 0 and 100", update.id)));
+            if p < 0 || p > 100 {
+                return Err(AppError::bad_request(format!(
+                    "Task {}: progress must be between 0 and 100",
+                    update.id
+                )));
             }
         }
 
-        let title = update.title.unwrap_or(current.title);
-        let status = update.status.unwrap_or(current.status);
-        let due_date = update.due_date.or(current.due_date.map(|d| d.with_timezone(&Utc)));
-        let start_date = update.start_date.map(normalize_to_midnight).or(current.start_date.map(|d| d.with_timezone(&Utc)));
-        let end_date = update.end_date.map(normalize_to_midnight).or(current.end_date.map(|d| d.with_timezone(&Utc)));
+        let title = update.title.unwrap_or_else(|| current.title.clone());
+        let description = current.description.clone();
+        let status = update.status.unwrap_or_else(|| current.status.clone());
+        let due_date = update
+            .due_date
+            .or(current.due_date.map(|d| d.with_timezone(&Utc)));
+        let start_date = update
+            .start_date
+            .map(normalize_to_midnight)
+            .or(current.start_date.map(|d| d.with_timezone(&Utc)));
+        let end_date = update
+            .end_date
+            .map(normalize_to_midnight)
+            .or(current.end_date.map(|d| d.with_timezone(&Utc)));
         let assignee = update.assignee.or(current.assignee);
         let parent_id = update.parent_id.or(current.parent_id);
         let progress = update.progress.unwrap_or(current.progress);
@@ -987,24 +1052,25 @@ pub async fn batch_update_tasks(
 
         let match_id = uuid_sql::match_uuid_clause("id");
         let update_sql = format!(
-            "UPDATE tasks SET title = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, updated_at = ? WHERE {}",
+            "UPDATE tasks SET title = ?, description = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, updated_at = ? WHERE {}",
             match_id
         );
 
         sqlx::query(&update_sql)
-        .bind(title)
-        .bind(status)
-        .bind(due_date)
-        .bind(start_date)
-        .bind(end_date)
-        .bind(assignee_str)
-        .bind(parent_id_str)
-        .bind(progress)
-        .bind(now)
-        .bind(update.id.to_string())
-        .bind(update.id.to_string())
-        .execute(&mut *tx)
-        .await?;
+            .bind(title)
+            .bind(description)
+            .bind(status)
+            .bind(due_date)
+            .bind(start_date)
+            .bind(end_date)
+            .bind(assignee_str)
+            .bind(parent_id_str)
+            .bind(progress)
+            .bind(now)
+            .bind(update.id.to_string())
+            .bind(update.id.to_string())
+            .execute(&mut *tx)
+            .await?;
 
         updated_ids.push(update.id);
     }
@@ -1021,9 +1087,12 @@ pub async fn batch_update_tasks(
     let assignee_case = uuid_sql::case_uuid("t.assignee");
     let parent_case = uuid_sql::case_uuid("t.parent_id");
 
-    let placeholders = std::iter::repeat("?").take(updated_ids.len()).collect::<Vec<_>>().join(",");
+    let placeholders = std::iter::repeat("?")
+        .take(updated_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
-        "SELECT {} , {} , t.title, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
+        "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
          FROM tasks t \
          WHERE t.id IN ({}) ORDER BY t.start_date ASC",
         id_case, proj_case, assignee_case, parent_case, placeholders
@@ -1074,6 +1143,13 @@ fn split_csv_values(raw: &str) -> Vec<&str> {
         .collect()
 }
 
+fn normalize_create_description(title: &str, description: Option<&str>) -> String {
+    match description.map(str::trim) {
+        Some(value) if !value.is_empty() => value.to_string(),
+        _ => format!("[Quick Add] {}", title.trim()),
+    }
+}
+
 #[derive(Copy, Clone)]
 enum DateBound {
     From,
@@ -1087,9 +1163,7 @@ fn parse_filter_datetime(field: &str, value: &str, bound: DateBound) -> AppResul
 
     if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
         let dt = match bound {
-            DateBound::From => date
-                .and_hms_opt(0, 0, 0)
-                .expect("valid midnight datetime"),
+            DateBound::From => date.and_hms_opt(0, 0, 0).expect("valid midnight datetime"),
             DateBound::To => date
                 .and_hms_opt(23, 59, 59)
                 .expect("valid end-of-day datetime"),
@@ -1103,25 +1177,51 @@ fn parse_filter_datetime(field: &str, value: &str, bound: DateBound) -> AppResul
     )))
 }
 
-async fn ensure_project_membership(pool: &SqlitePool, user_id: Uuid, project_id: Uuid) -> AppResult<()> {
-    let match_id = uuid_sql::match_uuid_clause("id");
-    let user_case = uuid_sql::case_uuid("user_id");
-    let match_user = uuid_sql::match_uuid_clause("user_id");
-    let sql = format!("SELECT {} FROM projects WHERE {} AND {} AND deleted_at IS NULL", user_case, match_id, match_user);
-    let owner_s = sqlx::query_scalar::<_, String>(&sql)
+async fn ensure_project_membership(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    project_id: Uuid,
+) -> AppResult<()> {
+    let match_id = uuid_sql::match_uuid_clause("p.id");
+    let match_owner = uuid_sql::match_uuid_clause("p.user_id");
+    let member_match = uuid_sql::match_uuid_clause("pm.user_id");
+    let project_case = uuid_sql::case_uuid("p.id");
+    let sql = format!(
+        "SELECT {} FROM projects p
+         WHERE {} AND p.deleted_at IS NULL
+           AND (
+               {}
+               OR EXISTS (
+                   SELECT 1
+                   FROM project_members pm
+                   WHERE pm.project_id = p.id
+                     AND {}
+                     AND pm.deleted_at IS NULL
+               )
+           )",
+        project_case, match_id, match_owner, member_match
+    );
+    let member_project = sqlx::query_scalar::<_, String>(&sql)
         .bind(project_id.to_string())
         .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .bind(user_id.to_string())
         .bind(user_id.to_string())
         .fetch_optional(pool)
         .await?;
 
-    let _owner = owner_s.ok_or_else(|| AppError::not_found("project not found"))?;
+    let _member_project = member_project.ok_or_else(|| AppError::not_found("project not found"))?;
 
     Ok(())
 }
 
-async fn fetch_task(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id: Uuid) -> AppResult<DbTask> {
+async fn fetch_task(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    project_id: Uuid,
+    task_id: Uuid,
+) -> AppResult<DbTask> {
     let id_case = uuid_sql::case_uuid("t.id");
     let project_case = uuid_sql::case_uuid("t.project_id");
     let assignee_case = uuid_sql::case_uuid("t.assignee");
@@ -1129,13 +1229,25 @@ async fn fetch_task(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id:
 
     let match_task = uuid_sql::match_uuid_clause("t.id");
     let match_proj = uuid_sql::match_uuid_clause("t.project_id");
-    let match_user = uuid_sql::match_uuid_clause("p.user_id");
+    let match_owner = uuid_sql::match_uuid_clause("p.user_id");
+    let member_match = uuid_sql::match_uuid_clause("pm.user_id");
 
     let sql = format!(
-        "SELECT {} , {} , t.title, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
-         FROM tasks t INNER JOIN projects p ON p.id = t.project_id \
-         WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-        id_case, project_case, assignee_case, parent_case, match_task, match_proj, match_user
+        "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
+         FROM tasks t
+         INNER JOIN projects p ON p.id = t.project_id
+         WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL
+           AND (
+               {}
+               OR EXISTS (
+                   SELECT 1
+                   FROM project_members pm
+                   WHERE pm.project_id = p.id
+                     AND {}
+                     AND pm.deleted_at IS NULL
+               )
+           )",
+        id_case, project_case, assignee_case, parent_case, match_task, match_proj, match_owner, member_match
     );
 
     let row = sqlx::query(&sql)
@@ -1143,6 +1255,8 @@ async fn fetch_task(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id:
         .bind(task_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .bind(user_id.to_string())
         .bind(user_id.to_string())
         .fetch_optional(pool)

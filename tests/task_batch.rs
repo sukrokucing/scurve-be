@@ -100,12 +100,20 @@ async fn test_batch_update_tasks() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(tasks.len(), 2);
-    let t1 = tasks.iter().find(|t| t["id"].as_str().unwrap() == task1_id.to_string()).unwrap();
-    let t2 = tasks.iter().find(|t| t["id"].as_str().unwrap() == task2_id.to_string()).unwrap();
+    let t1 = tasks
+        .iter()
+        .find(|t| t["id"].as_str().unwrap() == task1_id.to_string())
+        .unwrap();
+    let t2 = tasks
+        .iter()
+        .find(|t| t["id"].as_str().unwrap() == task2_id.to_string())
+        .unwrap();
 
     assert_eq!(t1["status"], "doing");
     assert_eq!(t1["progress"], 50);

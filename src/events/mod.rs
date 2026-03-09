@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-use sqlx::SqlitePool;
 
 pub mod loggable;
 pub use loggable::{Loggable, Severity};
@@ -19,7 +19,12 @@ pub struct DomainEvent<T> {
 }
 
 impl<T> DomainEvent<T> {
-    pub fn new(name: &'static str, actor_id: Option<Uuid>, subject_id: Option<Uuid>, payload: T) -> Self {
+    pub fn new(
+        name: &'static str,
+        actor_id: Option<Uuid>,
+        subject_id: Option<Uuid>,
+        payload: T,
+    ) -> Self {
         Self {
             id: Uuid::new_v4(),
             name,
@@ -169,7 +174,10 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
         let event_json = event.clone();
 
         // Basic extraction (tolerant)
-        let name = event.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let name = event
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let actor_id_str = event.get("actor_id").and_then(|v| v.as_str());
         let subject_id_str = event.get("subject_id").and_then(|v| v.as_str());
         let occurred_at_str = event.get("occurred_at").and_then(|v| v.as_str());
@@ -184,7 +192,8 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
             "user.registered" => "New user registered",
             "user.login" => "User logged in",
             _ => "System event",
-        }.to_string();
+        }
+        .to_string();
 
         // Extract severity from payload (Phase 5)
         let severity = event
@@ -195,8 +204,12 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
 
         // We store actor_id and subject_id as proper UUIDs if they parse, otherwise NULL
         // Converting to String for SQLite TEXT compatibility
-        let actor_id = actor_id_str.and_then(|s| Uuid::parse_str(s).ok()).map(|u| u.to_string());
-        let subject_id = subject_id_str.and_then(|s| Uuid::parse_str(s).ok()).map(|u| u.to_string());
+        let actor_id = actor_id_str
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .map(|u| u.to_string());
+        let subject_id = subject_id_str
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .map(|u| u.to_string());
 
         // Ensure we have a valid timestamp, or default to now
         let occurred_at = occurred_at_str
@@ -233,16 +246,15 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
         let payload_str = serde_json::to_string(&event_json).unwrap_or_default();
 
         // Get the previous hash from the last event
-        let prev_hash_result: Option<String> = sqlx::query_scalar(
-            "SELECT hash FROM event_store ORDER BY created_at DESC LIMIT 1"
-        )
-        .fetch_optional(&pool)
-        .await
-        .ok()
-        .flatten();
+        let prev_hash_result: Option<String> =
+            sqlx::query_scalar("SELECT hash FROM event_store ORDER BY created_at DESC LIMIT 1")
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
 
         // Compute SHA256(prev_hash || payload)
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         if let Some(ref ph) = prev_hash_result {
             hasher.update(ph.as_bytes());

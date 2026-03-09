@@ -19,8 +19,12 @@ pub struct Progress {
 }
 
 impl crate::events::Loggable for Progress {
-    fn entity_type() -> &'static str { "progress" }
-    fn subject_id(&self) -> Uuid { self.id }
+    fn entity_type() -> &'static str {
+        "progress"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]

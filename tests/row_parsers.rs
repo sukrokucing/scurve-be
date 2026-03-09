@@ -1,9 +1,12 @@
-use sqlx::SqlitePool;
-use sqlx::sqlite::SqlitePoolOptions;
-use uuid::Uuid;
 use chrono::Utc;
+use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::SqlitePool;
+use uuid::Uuid;
 
-use s_curve::db::row_parsers::{db_progress_from_row, db_task_from_row, db_project_from_row, db_user_from_row, db_project_plan_point_from_row};
+use s_curve::db::row_parsers::{
+    db_progress_from_row, db_project_from_row, db_project_plan_point_from_row, db_task_from_row,
+    db_user_from_row,
+};
 
 async fn setup_pool() -> SqlitePool {
     SqlitePoolOptions::new()
@@ -105,7 +108,7 @@ async fn parse_progress_row_numeric_timestamps_and_text_progress() {
 async fn parse_task_row_text_uuid() {
     let pool = setup_pool().await;
     sqlx::query(
-        "CREATE TABLE tasks (id TEXT, project_id TEXT, title TEXT, status TEXT, due_date TEXT, start_date TEXT, end_date TEXT, duration_days INTEGER, assignee TEXT, parent_id TEXT, progress INTEGER, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
+        "CREATE TABLE tasks (id TEXT, project_id TEXT, title TEXT, description TEXT, status TEXT, due_date TEXT, start_date TEXT, end_date TEXT, duration_days INTEGER, assignee TEXT, parent_id TEXT, progress INTEGER, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
     )
     .execute(&pool)
     .await
@@ -116,10 +119,11 @@ async fn parse_task_row_text_uuid() {
     let assignee = Uuid::new_v4();
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query("INSERT INTO tasks (id, project_id, title, status, due_date, start_date, end_date, duration_days, assignee, parent_id, progress, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO tasks (id, project_id, title, description, status, due_date, start_date, end_date, duration_days, assignee, parent_id, progress, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(id.to_string())
         .bind(project_id.to_string())
         .bind("T")
+        .bind("[Migrated] T")
         .bind("pending")
         .bind(Option::<String>::None)
         .bind(Option::<String>::None)
@@ -145,6 +149,7 @@ async fn parse_task_row_text_uuid() {
     assert_eq!(parsed.id, id);
     assert_eq!(parsed.project_id, project_id);
     assert_eq!(parsed.title, "T");
+    assert_eq!(parsed.description, "[Migrated] T");
     assert_eq!(parsed.assignee.unwrap(), assignee);
 }
 

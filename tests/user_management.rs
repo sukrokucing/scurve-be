@@ -34,19 +34,22 @@ async fn test_user_management_crud() -> Result<()> {
 
     // 3. Grant 'user.manage' permission
     // Fetch the permission ID for 'user.manage' (seeded by migration)
-    let perm_id: String = sqlx::query_scalar("SELECT id FROM permissions WHERE name = 'user.manage'")
-        .fetch_one(&pool)
-        .await
-        .context("user.manage permission not found")?;
+    let perm_id: String =
+        sqlx::query_scalar("SELECT id FROM permissions WHERE name = 'user.manage'")
+            .fetch_one(&pool)
+            .await
+            .context("user.manage permission not found")?;
 
     let perm_grant_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO user_permissions (id, user_id, permission_id, created_at) VALUES (?, ?, ?, ?)")
-        .bind(perm_grant_id.to_string())
-        .bind(admin_id.to_string())
-        .bind(perm_id)
-        .bind(now)
-        .execute(&pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO user_permissions (id, user_id, permission_id, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(perm_grant_id.to_string())
+    .bind(admin_id.to_string())
+    .bind(perm_id)
+    .bind(now)
+    .execute(&pool)
+    .await?;
 
     // 4. Generate JWT
     let jwt_config = JwtConfig {
@@ -119,10 +122,11 @@ async fn test_user_management_crud() -> Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Verify Soft Delete (deleted_at is NOT NULL)
-    let deleted_at: Option<String> = sqlx::query_scalar("SELECT deleted_at FROM users WHERE id = ?")
-        .bind(new_user_id.to_string())
-        .fetch_one(&pool)
-        .await?;
+    let deleted_at: Option<String> =
+        sqlx::query_scalar("SELECT deleted_at FROM users WHERE id = ?")
+            .bind(new_user_id.to_string())
+            .fetch_one(&pool)
+            .await?;
     assert!(deleted_at.is_some(), "deleted_at should be set");
 
     // 8. Test 404 on deleted user update (optional, but good practice)

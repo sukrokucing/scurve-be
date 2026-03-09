@@ -37,11 +37,24 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::CREATED {
-        panic!("register failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "register failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let auth_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let token = auth_res.get("token").and_then(|v| v.as_str()).context("missing token")?.to_string();
-    let user_id = auth_res.get("user").and_then(|u| u.get("id")).and_then(|v| v.as_str()).context("missing user id")?.to_string();
+    let token = auth_res
+        .get("token")
+        .and_then(|v| v.as_str())
+        .context("missing token")?
+        .to_string();
+    let user_id = auth_res
+        .get("user")
+        .and_then(|u| u.get("id"))
+        .and_then(|v| v.as_str())
+        .context("missing user id")?
+        .to_string();
 
     // seed a project, task and two progress rows directly into the DB using SQL
     let project_uuid = Uuid::new_v4();
@@ -113,10 +126,18 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::OK {
-        panic!("projects list failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "projects list failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let projects: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    assert!(projects.as_array().unwrap().iter().any(|p| p.get("id").and_then(|id| id.as_str()) == Some(&project_id)));
+    assert!(projects
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p.get("id").and_then(|id| id.as_str()) == Some(&project_id)));
 
     // GET /projects/{project_id}/tasks and ensure our task appears
     let req = Request::builder()
@@ -129,15 +150,26 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::OK {
-        panic!("tasks list failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "tasks list failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let tasks: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    assert!(tasks.as_array().unwrap().iter().any(|t| t.get("id").and_then(|id| id.as_str()) == Some(&task_id)));
+    assert!(tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t.get("id").and_then(|id| id.as_str()) == Some(&task_id)));
 
     // GET /projects/{project_id}/tasks/{task_id}/progress and ensure seeded progress rows exist
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/projects/{}/tasks/{}/progress", project_id, task_id))
+        .uri(format!(
+            "/projects/{}/tasks/{}/progress",
+            project_id, task_id
+        ))
         .header("authorization", format!("Bearer {}", token))
         .body(Body::empty())?;
 
@@ -145,10 +177,19 @@ async fn seeded_db_is_visible_via_api() -> Result<()> {
     let status = resp.status();
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     if status != StatusCode::OK {
-        panic!("progress list failed: {} - {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "progress list failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
     let progress_list: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let ids: Vec<&str> = progress_list.as_array().unwrap().iter().filter_map(|v| v.get("id").and_then(|x| x.as_str())).collect();
+    let ids: Vec<&str> = progress_list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.get("id").and_then(|x| x.as_str()))
+        .collect();
     assert!(ids.contains(&prog1_id.as_str()));
     assert!(ids.contains(&prog2_id.as_str()));
 

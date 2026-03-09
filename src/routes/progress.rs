@@ -1,10 +1,10 @@
-use axum::extract::{Path, State, Query};
-use serde::Deserialize;
+use crate::db::{row_parsers, uuid_sql};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use serde::Deserialize;
 use sqlx::SqlitePool;
 use uuid::Uuid;
-use crate::db::{uuid_sql, row_parsers};
 
 use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
@@ -48,7 +48,10 @@ pub async fn list_progress(
         parsed.push(row_parsers::db_progress_from_row(&row)?);
     }
 
-    let items = parsed.into_iter().map(Progress::try_from).collect::<Result<_, _>>()?;
+    let items = parsed
+        .into_iter()
+        .map(Progress::try_from)
+        .collect::<Result<_, _>>()?;
     Ok(Json(items))
 }
 
@@ -88,7 +91,10 @@ pub async fn list_progress_by_task(
         parsed.push(row_parsers::db_progress_from_row(&row)?);
     }
 
-    let items = parsed.into_iter().map(Progress::try_from).collect::<Result<_, _>>()?;
+    let items = parsed
+        .into_iter()
+        .map(Progress::try_from)
+        .collect::<Result<_, _>>()?;
     Ok(Json(items))
 }
 
@@ -117,13 +123,30 @@ pub async fn list_project_progress(
     auth: AuthUser,
 ) -> AppResult<Json<Vec<Progress>>> {
     // verify project belongs to user
-    let match_proj = uuid_sql::match_uuid_clause("id");
-    let match_user = uuid_sql::match_uuid_clause("user_id");
-    let user_case = uuid_sql::case_uuid("user_id");
-    let sql_owner = format!("SELECT {} FROM projects WHERE {} AND {} AND deleted_at IS NULL", user_case, match_proj, match_user);
+    let match_proj = uuid_sql::match_uuid_clause("p.id");
+    let match_owner = uuid_sql::match_uuid_clause("p.user_id");
+    let member_match = uuid_sql::match_uuid_clause("pm.user_id");
+    let project_case = uuid_sql::case_uuid("p.id");
+    let sql_owner = format!(
+        "SELECT {} FROM projects p
+         WHERE {} AND p.deleted_at IS NULL
+           AND (
+               {}
+               OR EXISTS (
+                   SELECT 1
+                   FROM project_members pm
+                   WHERE pm.project_id = p.id
+                     AND {}
+                     AND pm.deleted_at IS NULL
+               )
+           )",
+        project_case, match_proj, match_owner, member_match
+    );
     let owner_s = sqlx::query_scalar::<_, String>(&sql_owner)
         .bind(project_id.to_string())
         .bind(project_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
         .bind(auth.user_id.to_string())
         .bind(auth.user_id.to_string())
         .fetch_optional(&state.pool)
@@ -139,17 +162,32 @@ pub async fn list_project_progress(
         // ensure task belongs to project
         let p_match = uuid_sql::match_uuid_clause("p.id");
         let t_match = uuid_sql::match_uuid_clause("t.id");
-        let p_user_match = uuid_sql::match_uuid_clause("p.user_id");
-        let user_case = uuid_sql::case_uuid("p.user_id");
+        let p_owner_match = uuid_sql::match_uuid_clause("p.user_id");
+        let p_member_match = uuid_sql::match_uuid_clause("pm.user_id");
+        let project_case = uuid_sql::case_uuid("p.id");
         let sql_t_owner = format!(
-            "SELECT {} FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-            user_case, p_match, t_match, p_user_match
+            "SELECT {} FROM projects p
+             INNER JOIN tasks t ON t.project_id = p.id
+             WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL
+               AND (
+                   {}
+                   OR EXISTS (
+                       SELECT 1
+                       FROM project_members pm
+                       WHERE pm.project_id = p.id
+                         AND {}
+                         AND pm.deleted_at IS NULL
+                   )
+               )",
+            project_case, p_match, t_match, p_owner_match, p_member_match
         );
         let _t_owner = sqlx::query_scalar::<_, String>(&sql_t_owner)
             .bind(project_id.to_string())
             .bind(project_id.to_string())
             .bind(task_id.to_string())
             .bind(task_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
             .bind(auth.user_id.to_string())
             .bind(auth.user_id.to_string())
             .fetch_optional(&state.pool)
@@ -193,7 +231,10 @@ pub async fn list_project_progress(
         parsed
     };
 
-    let items = rows.into_iter().map(Progress::try_from).collect::<Result<_, _>>()?;
+    let items = rows
+        .into_iter()
+        .map(Progress::try_from)
+        .collect::<Result<_, _>>()?;
     Ok(Json(items))
 }
 
@@ -230,17 +271,17 @@ pub async fn create_progress(
     );
 
     sqlx::query(&insert_sql)
-    .bind(id.to_string())
-    .bind(task_id.to_string())
-    .bind(task_id.to_string())
-    .bind(project_id.to_string())
-    .bind(project_id.to_string())
-    .bind(payload.progress)
-    .bind(payload.note)
-    .bind(now)
-    .bind(now)
-    .execute(&state.pool)
-    .await?;
+        .bind(id.to_string())
+        .bind(task_id.to_string())
+        .bind(task_id.to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(payload.progress)
+        .bind(payload.note)
+        .bind(now)
+        .bind(now)
+        .execute(&state.pool)
+        .await?;
 
     let id_case = uuid_sql::case_uuid("id");
     let project_case = uuid_sql::case_uuid("project_id");
@@ -407,14 +448,32 @@ pub async fn get_progress(
     Ok(Json(item))
 }
 
-async fn ensure_task_belongs_to_user(pool: &SqlitePool, user_id: Uuid, project_id: Uuid, task_id: Uuid) -> AppResult<()> {
+async fn ensure_task_belongs_to_user(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    project_id: Uuid,
+    task_id: Uuid,
+) -> AppResult<()> {
     let match_proj = uuid_sql::match_uuid_clause("p.id");
     let match_task = uuid_sql::match_uuid_clause("t.id");
-    let match_user = uuid_sql::match_uuid_clause("p.user_id");
-    let user_case = uuid_sql::case_uuid("p.user_id");
+    let match_owner = uuid_sql::match_uuid_clause("p.user_id");
+    let member_match = uuid_sql::match_uuid_clause("pm.user_id");
+    let project_case = uuid_sql::case_uuid("p.id");
     let sql = format!(
-        "SELECT {} FROM projects p INNER JOIN tasks t ON t.project_id = p.id WHERE {} AND {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-        user_case, match_proj, match_task, match_user
+        "SELECT {} FROM projects p
+         INNER JOIN tasks t ON t.project_id = p.id
+         WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL
+           AND (
+               {}
+               OR EXISTS (
+                   SELECT 1
+                   FROM project_members pm
+                   WHERE pm.project_id = p.id
+                     AND {}
+                     AND pm.deleted_at IS NULL
+               )
+           )",
+        project_case, match_proj, match_task, match_owner, member_match
     );
 
     let owner_s = sqlx::query_scalar::<_, String>(&sql)
@@ -422,6 +481,8 @@ async fn ensure_task_belongs_to_user(pool: &SqlitePool, user_id: Uuid, project_i
         .bind(project_id.to_string())
         .bind(task_id.to_string())
         .bind(task_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .bind(user_id.to_string())
         .bind(user_id.to_string())
         .fetch_optional(pool)
@@ -437,19 +498,32 @@ async fn ensure_task_belongs_to_user_by_task_id(
     task_id: Uuid,
 ) -> AppResult<()> {
     let match_task = uuid_sql::match_uuid_clause("t.id");
-    let match_user = uuid_sql::match_uuid_clause("p.user_id");
-    let user_case = uuid_sql::case_uuid("p.user_id");
+    let match_owner = uuid_sql::match_uuid_clause("p.user_id");
+    let member_match = uuid_sql::match_uuid_clause("pm.user_id");
+    let project_case = uuid_sql::case_uuid("p.id");
     let sql = format!(
         "SELECT {}
          FROM projects p
          INNER JOIN tasks t ON t.project_id = p.id
-         WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL",
-        user_case, match_task, match_user
+         WHERE {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL
+           AND (
+               {}
+               OR EXISTS (
+                   SELECT 1
+                   FROM project_members pm
+                   WHERE pm.project_id = p.id
+                     AND {}
+                     AND pm.deleted_at IS NULL
+               )
+           )",
+        project_case, match_task, match_owner, member_match
     );
 
     let owner_s = sqlx::query_scalar::<_, String>(&sql)
         .bind(task_id.to_string())
         .bind(task_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .bind(user_id.to_string())
         .bind(user_id.to_string())
         .fetch_optional(pool)

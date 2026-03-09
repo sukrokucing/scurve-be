@@ -12,7 +12,13 @@ use s_curve::create_app;
 
 mod support;
 
-async fn setup() -> Result<(axum::Router, sqlx::SqlitePool, String, Uuid, support::db::TestDb)> {
+async fn setup() -> Result<(
+    axum::Router,
+    sqlx::SqlitePool,
+    String,
+    Uuid,
+    support::db::TestDb,
+)> {
     let test_db = support::db::cloned_clean_db().await?;
     let pool = test_db.pool.clone();
 

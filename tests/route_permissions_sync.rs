@@ -44,7 +44,9 @@ fn protected_openapi_operations(spec: &Value) -> BTreeSet<(String, String)> {
             continue;
         }
 
-        let Some(path_obj) = path_item.as_object() else { continue; };
+        let Some(path_obj) = path_item.as_object() else {
+            continue;
+        };
         let pattern = canonical_pattern(path);
         for (method, _) in path_obj {
             if HTTP_METHODS.contains(&method.as_str()) {

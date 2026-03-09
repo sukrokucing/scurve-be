@@ -1,16 +1,16 @@
-use s_curve::models::user::{RegisterRequest, AuthResponse};
-use s_curve::models::project::Project;
-use s_curve::models::rbac::GrantPermissionRequest;
-use s_curve::models::project::ProjectCreateRequest;
-use sqlx::SqlitePool;
-use std::sync::Arc;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
     Router,
 };
-use tower::ServiceExt;
+use s_curve::models::project::Project;
+use s_curve::models::project::ProjectCreateRequest;
+use s_curve::models::rbac::GrantPermissionRequest;
+use s_curve::models::user::{AuthResponse, RegisterRequest};
 use serde_json::json;
+use sqlx::SqlitePool;
+use std::sync::Arc;
+use tower::ServiceExt;
 
 mod support;
 
@@ -34,7 +34,9 @@ async fn setup() -> (Router, SqlitePool, String, support::db::TestDb) {
             exp_hours: 1,
         }),
         event_bus: tx,
-        route_permission_cache: s_curve::authz::RoutePermissionCache::load(&pool).await.unwrap(),
+        route_permission_cache: s_curve::authz::RoutePermissionCache::load(&pool)
+            .await
+            .unwrap(),
     };
 
     let app = s_curve::app::api_routes(state);
@@ -55,17 +57,29 @@ async fn setup() -> (Router, SqlitePool, String, support::db::TestDb) {
     sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)")
         .bind(user_id.to_string())
         .bind(role_id.to_string())
-        .execute(&pool).await.expect("Failed to insert user_role");
+        .execute(&pool)
+        .await
+        .expect("Failed to insert user_role");
 
     (app, pool, admin_token, test_db)
 }
 
 fn insert_hyphens(s: &str) -> String {
-    format!("{}-{}-{}-{}-{}", &s[0..8], &s[8..12], &s[12..16], &s[16..20], &s[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &s[0..8],
+        &s[8..12],
+        &s[12..16],
+        &s[16..20],
+        &s[20..32]
+    )
 }
 
 async fn fetch_id(pool: &SqlitePool, table: &str, field: &str, val: &str) -> uuid::Uuid {
-    let sql = format!("SELECT CASE WHEN typeof(id)='blob' THEN lower(hex(id)) ELSE id END FROM {} WHERE {} = ?", table, field);
+    let sql = format!(
+        "SELECT CASE WHEN typeof(id)='blob' THEN lower(hex(id)) ELSE id END FROM {} WHERE {} = ?",
+        table, field
+    );
     let id_str: String = sqlx::query_scalar(&sql)
         .bind(val)
         .fetch_one(pool)
@@ -143,7 +157,9 @@ async fn test_scoped_permission_enforcement() {
         .uri(&format!("/rbac/users/{}/permissions", user_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", admin_token))
-        .body(Body::from(serde_json::to_string(&grant_project_create).unwrap()))
+        .body(Body::from(
+            serde_json::to_string(&grant_project_create).unwrap(),
+        ))
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
@@ -169,7 +185,6 @@ async fn test_scoped_permission_enforcement() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 
-
     // 5. Access Project A tasks (allowed)
     let req = Request::builder()
         .method("GET")
@@ -179,7 +194,11 @@ async fn test_scoped_permission_enforcement() {
         .unwrap();
 
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK, "Should be allowed to view Project A tasks");
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "Should be allowed to view Project A tasks"
+    );
 
     // 6. Access Project B tasks (denied due scoped permission mismatch)
     let req = Request::builder()
@@ -190,5 +209,9 @@ async fn test_scoped_permission_enforcement() {
         .unwrap();
 
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN, "Should be denied view Project B tasks");
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "Should be denied view Project B tasks"
+    );
 }

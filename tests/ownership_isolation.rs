@@ -91,7 +91,12 @@ async fn cross_user_access_is_blocked() {
     .unwrap();
 
     // Give outsider broad RBAC route permissions so strict mode cannot mask ownership checks.
-    for permission_name in ["project.view", "project.update", "task.view", "progress.view"] {
+    for permission_name in [
+        "project.view",
+        "project.update",
+        "task.view",
+        "progress.view",
+    ] {
         let permission_id: String = sqlx::query_scalar("SELECT id FROM permissions WHERE name = ?")
             .bind(permission_name)
             .fetch_one(&pool)
@@ -166,7 +171,10 @@ async fn cross_user_access_is_blocked() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/projects/{}/tasks/{}/progress", project_id, task_id))
+                .uri(format!(
+                    "/projects/{}/tasks/{}/progress",
+                    project_id, task_id
+                ))
                 .header("Authorization", format!("Bearer {}", outsider_token))
                 .body(Body::empty())
                 .unwrap(),
@@ -207,11 +215,12 @@ async fn cross_user_access_is_blocked() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 
     // Sanity check the original data was not modified.
-    let plan_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM project_plan WHERE project_id = ?")
-        .bind(project_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let plan_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM project_plan WHERE project_id = ?")
+            .bind(project_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(plan_count, 0);
 
     let body_bytes = body::to_bytes(res.into_body(), usize::MAX).await.unwrap();

@@ -35,7 +35,11 @@ async fn test_list_users_pagination_and_search() -> Result<()> {
 
     let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
     let auth_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let token = auth_res.get("token").and_then(|v| v.as_str()).context("missing token")?.to_string();
+    let token = auth_res
+        .get("token")
+        .and_then(|v| v.as_str())
+        .context("missing token")?
+        .to_string();
 
     // 2. Register another user
     let register_body2 = json!({
@@ -63,7 +67,14 @@ async fn test_list_users_pagination_and_search() -> Result<()> {
     let resp_list: Response = app.clone().oneshot(req_list).await?;
     assert_eq!(resp_list.status(), StatusCode::OK);
 
-    let total_count = resp_list.headers().get("X-Total-Count").unwrap().to_str().unwrap().parse::<i64>().unwrap();
+    let total_count = resp_list
+        .headers()
+        .get("X-Total-Count")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse::<i64>()
+        .unwrap();
     assert!(total_count >= 2);
 
     let body_bytes = body::to_bytes(resp_list.into_body(), 10_485_760).await?;

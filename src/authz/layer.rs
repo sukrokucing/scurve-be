@@ -1,14 +1,9 @@
-use axum::{
-    body::Body,
-    http::Request,
-    middleware::Next,
-    response::Response,
-};
+use axum::{body::Body, http::Request, middleware::Next, response::Response};
 
+use super::{AuthzMode, DefaultPolicyEvaluator, PolicyEvaluator, Principal, ResourceContext};
 use crate::app::AppState;
 use crate::errors::AppError;
 use crate::jwt::AuthUser;
-use super::{Principal, ResourceContext, DefaultPolicyEvaluator, PolicyEvaluator, AuthzMode};
 
 use axum::extract::State;
 
@@ -34,7 +29,10 @@ pub async fn dynamic_authz(
     let path = req.uri().path();
 
     // Look up required permission from cache
-    let permission = state.route_permission_cache.get_permission(method, path).await;
+    let permission = state
+        .route_permission_cache
+        .get_permission(method, path)
+        .await;
 
     match permission {
         Some(perm) => {
@@ -44,7 +42,7 @@ pub async fn dynamic_authz(
                 .map_err(|e| AppError::internal(format!("Failed to load principal: {}", e)))?;
 
             // Build resource context from path (extract project_id if present)
-            let ctx = extract_resource_context(path);
+            let ctx = extract_resource_context(method, path);
 
             let evaluator = DefaultPolicyEvaluator::new();
             let allowed = evaluator.can(&principal, &perm, &ctx).await;
@@ -89,7 +87,7 @@ pub async fn dynamic_authz(
 }
 
 /// Extract resource context from the request path
-fn extract_resource_context(path: &str) -> ResourceContext {
+fn extract_resource_context(method: &str, path: &str) -> ResourceContext {
     let mut ctx = ResourceContext::new();
 
     // Extract project_id from paths like /projects/{uuid}/...
@@ -102,6 +100,16 @@ fn extract_resource_context(path: &str) -> ResourceContext {
                 }
             }
         }
+    }
+
+    // Some list-style endpoints are project-agnostic in the URL but should still
+    // be reachable with scoped project permissions.
+    let is_project_agnostic_list = (method.eq_ignore_ascii_case("GET") && path == "/projects")
+        || (method.eq_ignore_ascii_case("GET") && path == "/users/me/projects")
+        || (method.eq_ignore_ascii_case("GET") && path == "/portfolio/s-curve/summary");
+
+    if is_project_agnostic_list {
+        ctx = ctx.allow_project_scoped_without_target();
     }
 
     ctx

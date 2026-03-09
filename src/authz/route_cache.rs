@@ -3,10 +3,10 @@
 //! Caches route-to-permission mappings from the database for fast lookup.
 //! Supports pattern matching for dynamic route segments like `:id`.
 
+use regex::Regex;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use regex::Regex;
 
 /// Cached route-permission mapping
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ impl RoutePermissionCache {
     /// Refresh mappings from the database
     pub async fn refresh(&self, pool: &SqlitePool) -> Result<(), sqlx::Error> {
         let rows = sqlx::query_as::<_, (String, String, String)>(
-            "SELECT route_pattern, method, permission_name FROM route_permissions"
+            "SELECT route_pattern, method, permission_name FROM route_permissions",
         )
         .fetch_all(pool)
         .await?;

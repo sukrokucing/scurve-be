@@ -68,7 +68,9 @@ async fn test_task_hierarchy() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let parent_task: Value = serde_json::from_slice(&body).unwrap();
     let parent_id = parent_task["id"].as_str().unwrap();
 
@@ -95,7 +97,9 @@ async fn test_task_hierarchy() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let child_task: Value = serde_json::from_slice(&body).unwrap();
     let child_id = child_task["id"].as_str().unwrap();
 
@@ -116,7 +120,9 @@ async fn test_task_hierarchy() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
 
     let fetched_child = tasks.iter().find(|t| t["id"] == child_id).unwrap();

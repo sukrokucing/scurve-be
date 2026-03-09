@@ -1,14 +1,14 @@
 mod app;
+mod authz;
 #[path = "db/mod.rs"]
 mod db;
 mod docs;
 mod errors;
+mod events;
 mod jwt;
 mod models;
 mod routes;
 mod utils;
-mod events;
-mod authz;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,7 +46,11 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("starting plaintext HTTP (no CERT_PATH/KEY_PATH provided)");
         // plaintext (no TLS)
         let listener = tokio::net::TcpListener::bind(addr).await?;
-        axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await?;
     }
 
     Ok(())

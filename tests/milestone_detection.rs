@@ -3,7 +3,7 @@
 //! Verifies that tasks with start_date == end_date (same calendar day) return
 //! identical timestamps, enabling frontend milestone detection.
 
-use chrono::{DateTime, Utc, Timelike};
+use chrono::{DateTime, Timelike, Utc};
 mod support;
 
 use uuid::Uuid;
@@ -35,7 +35,11 @@ async fn test_milestone_same_day_dates_are_identical() -> anyhow::Result<()> {
     let end_dt: DateTime<Utc> = end_date.parse()?;
 
     // Normalize to midnight
-    let start_normalized = start_dt.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let start_normalized = start_dt
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
     let end_normalized = end_dt.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, start_date, end_date, created_at, updated_at) VALUES (?, ?, 'Release Milestone', 'pending', ?, ?, ?, ?)")
@@ -49,10 +53,11 @@ async fn test_milestone_same_day_dates_are_identical() -> anyhow::Result<()> {
         .await?;
 
     // Retrieve and verify
-    let row: (String, String) = sqlx::query_as("SELECT start_date, end_date FROM tasks WHERE id = ?")
-        .bind(task_id.to_string())
-        .fetch_one(&pool)
-        .await?;
+    let row: (String, String) =
+        sqlx::query_as("SELECT start_date, end_date FROM tasks WHERE id = ?")
+            .bind(task_id.to_string())
+            .fetch_one(&pool)
+            .await?;
 
     let fetched_start: DateTime<Utc> = row.0.parse()?;
     let fetched_end: DateTime<Utc> = row.1.parse()?;
@@ -62,14 +67,23 @@ async fn test_milestone_same_day_dates_are_identical() -> anyhow::Result<()> {
         fetched_start.timestamp(),
         fetched_end.timestamp(),
         "Milestone detection requires identical timestamps. Got start={} end={}",
-        row.0, row.1
+        row.0,
+        row.1
     );
 
     // Verify both are at midnight
-    assert_eq!(fetched_start.time().hour(), 0, "start_date should be at midnight");
+    assert_eq!(
+        fetched_start.time().hour(),
+        0,
+        "start_date should be at midnight"
+    );
     assert_eq!(fetched_start.time().minute(), 0);
     assert_eq!(fetched_start.time().second(), 0);
-    assert_eq!(fetched_end.time().hour(), 0, "end_date should be at midnight");
+    assert_eq!(
+        fetched_end.time().hour(),
+        0,
+        "end_date should be at midnight"
+    );
     assert_eq!(fetched_end.time().minute(), 0);
     assert_eq!(fetched_end.time().second(), 0);
 
@@ -92,7 +106,11 @@ async fn test_different_days_not_milestone() -> anyhow::Result<()> {
     let start_dt: DateTime<Utc> = start_date.parse()?;
     let end_dt: DateTime<Utc> = end_date.parse()?;
 
-    let start_normalized = start_dt.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let start_normalized = start_dt
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
     let end_normalized = end_dt.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
 
     sqlx::query("INSERT INTO tasks (id, project_id, title, status, start_date, end_date, created_at, updated_at) VALUES (?, ?, 'Multi-day Task', 'pending', ?, ?, ?, ?)")
@@ -105,10 +123,11 @@ async fn test_different_days_not_milestone() -> anyhow::Result<()> {
         .execute(&pool)
         .await?;
 
-    let row: (String, String) = sqlx::query_as("SELECT start_date, end_date FROM tasks WHERE id = ?")
-        .bind(task_id.to_string())
-        .fetch_one(&pool)
-        .await?;
+    let row: (String, String) =
+        sqlx::query_as("SELECT start_date, end_date FROM tasks WHERE id = ?")
+            .bind(task_id.to_string())
+            .fetch_one(&pool)
+            .await?;
 
     let fetched_start: DateTime<Utc> = row.0.parse()?;
     let fetched_end: DateTime<Utc> = row.1.parse()?;

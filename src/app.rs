@@ -1,19 +1,18 @@
 use std::sync::Arc;
 
-
 use axum::routing::{delete, get, post, put};
 use axum::Router;
 use sqlx::SqlitePool;
-use utoipa::OpenApi;
+use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
+use utoipa::OpenApi;
 
-use crate::events::{self, EventBus};
-use crate::errors::AppError;
-use crate::jwt::JwtConfig;
-use crate::routes::{auth, projects, tasks, progress, health, rbac, users, telemetry};
 use crate::authz::RoutePermissionCache;
+use crate::errors::AppError;
+use crate::events::{self, EventBus};
+use crate::jwt::JwtConfig;
+use crate::routes::{auth, health, progress, projects, rbac, tasks, telemetry, users};
 
 fn env_var_u32(name: &str, default: u32) -> u32 {
     std::env::var(name)
@@ -31,7 +30,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(pool: SqlitePool, jwt: JwtConfig, event_bus: EventBus, route_cache: RoutePermissionCache) -> Self {
+    pub fn new(
+        pool: SqlitePool,
+        jwt: JwtConfig,
+        event_bus: EventBus,
+        route_cache: RoutePermissionCache,
+    ) -> Self {
         Self {
             pool,
             jwt: Arc::new(jwt),
@@ -41,8 +45,8 @@ impl AppState {
     }
 }
 
-use axum::middleware::from_fn_with_state;
 use crate::authz;
+use axum::middleware::from_fn_with_state;
 
 pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
     let jwt_config = JwtConfig::from_env()?;
@@ -57,7 +61,9 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
         .map_err(|e| AppError::internal(format!("Failed to load route permissions: {}", e)))?;
 
     // Validate cached routes against OpenAPI documentation
-    route_cache.validate_against_openapi(&crate::docs::ApiDoc::openapi()).await;
+    route_cache
+        .validate_against_openapi(&crate::docs::ApiDoc::openapi())
+        .await;
 
     let state = AppState::new(pool, jwt_config, event_bus, route_cache);
 
@@ -71,7 +77,10 @@ struct SafeIpKeyExtractor;
 impl tower_governor::key_extractor::KeyExtractor for SafeIpKeyExtractor {
     type Key = std::net::IpAddr;
 
-    fn extract<B>(&self, req: &axum::http::Request<B>) -> Result<Self::Key, tower_governor::GovernorError> {
+    fn extract<B>(
+        &self,
+        req: &axum::http::Request<B>,
+    ) -> Result<Self::Key, tower_governor::GovernorError> {
         req.extensions()
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
             .map(|axum::extract::ConnectInfo(addr)| addr.ip())
@@ -116,7 +125,14 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/", get(projects::list_projects))
         .route("/", post(projects::create_project))
         .route("/:id/dashboard", get(projects::get_project_dashboard))
-        .route("/:id/critical-path", get(projects::get_project_critical_path))
+        .route(
+            "/:id/critical-path",
+            get(projects::get_project_critical_path),
+        )
+        .route(
+            "/:id/s-curve/health",
+            get(projects::get_project_s_curve_health),
+        )
         .route("/:id", get(projects::get_project))
         .route("/:id", put(projects::update_project))
         .route("/:id", delete(projects::delete_project))
@@ -148,39 +164,55 @@ pub fn api_routes(state: AppState) -> Router {
 
     // User routes
     let user_routes = Router::new()
+        .route("/me/projects", get(projects::list_my_project_scopes))
         .route("/", get(users::list_users))
         .route("/", post(users::create_user))
         .route("/:id", put(users::update_user))
         .route("/:id", delete(users::delete_user));
 
     // Project-level progress route
-    let project_progress_routes = Router::new()
-        .route("/", get(progress::list_project_progress));
+    let project_progress_routes = Router::new().route("/", get(progress::list_project_progress));
 
-    let project_assignee_routes = Router::new()
-        .route("/", get(tasks::list_project_assignees));
+    let project_assignee_routes = Router::new().route("/", get(tasks::list_project_assignees));
+
+    let project_member_routes = Router::new()
+        .route("/", get(projects::list_project_members))
+        .route("/", post(projects::create_project_member))
+        .route("/:user_id", delete(projects::delete_project_member));
 
     // Backward-compatible route for task progress lookup without project_id in path.
-    let legacy_task_progress_routes = Router::new()
-        .route("/", get(progress::list_progress_by_task));
+    let legacy_task_progress_routes =
+        Router::new().route("/", get(progress::list_progress_by_task));
 
-    let telemetry_routes = Router::new()
-        .route("/events", post(telemetry::ingest_events));
+    let telemetry_routes = Router::new().route("/events", post(telemetry::ingest_events));
+
+    let portfolio_routes = Router::new().route(
+        "/s-curve/summary",
+        get(projects::get_portfolio_s_curve_summary),
+    );
 
     // Protected routes (require authentication and authorization)
     let protected_routes = Router::new()
         .nest("/users", user_routes)
         .nest("/projects", project_routes)
         .nest("/projects/:project_id/assignees", project_assignee_routes)
+        .nest("/projects/:project_id/members", project_member_routes)
         .nest("/projects/:project_id/tasks", task_routes)
-        .nest("/projects/:project_id/tasks/:task_id/progress", progress_routes)
+        .nest(
+            "/projects/:project_id/tasks/:task_id/progress",
+            progress_routes,
+        )
         .nest("/projects/:project_id/progress", project_progress_routes)
         .nest("/projects/:project_id/dependencies", dependency_routes)
+        .nest("/portfolio", portfolio_routes)
         .nest("/tasks/:task_id/progress", legacy_task_progress_routes)
         .nest("/telemetry", telemetry_routes)
         .nest("/rbac", rbac::routes(state.clone()))
         // Apply authorization middleware only to protected routes
-        .layer(from_fn_with_state(state.clone(), authz::layer::dynamic_authz));
+        .layer(from_fn_with_state(
+            state.clone(),
+            authz::layer::dynamic_authz,
+        ));
 
     // Public routes (no authentication required)
     let api = Router::new()
@@ -203,9 +235,7 @@ pub fn api_routes(state: AppState) -> Router {
             .unwrap(),
     );
 
-    Router::new()
-        .merge(api)
-        .layer(GovernorLayer {
-            config: global_governor_conf,
-        })
+    Router::new().merge(api).layer(GovernorLayer {
+        config: global_governor_conf,
+    })
 }

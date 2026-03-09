@@ -4,9 +4,9 @@ use axum::{
     http::{Request, StatusCode},
     response::Response,
 };
+use chrono::Utc;
 use serde_json::json;
 use tower::ServiceExt; // for `oneshot`
-use chrono::Utc;
 
 use s_curve::create_app;
 use s_curve::models::task::TaskCreateRequest;
@@ -37,14 +37,18 @@ async fn test_activity_log_flow() -> Result<()> {
 
     // Inject ConnectInfo for rate limiting
     use axum::extract::ConnectInfo;
-    use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
     req.extensions_mut().insert(ConnectInfo(addr));
 
     let resp: Response = app.clone().oneshot(req).await?;
     let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await?;
     let auth_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let token = auth_res.get("token").and_then(|v| v.as_str()).context("missing token")?.to_string();
+    let token = auth_res
+        .get("token")
+        .and_then(|v| v.as_str())
+        .context("missing token")?
+        .to_string();
 
     // 3. Create Project
     let project_body = json!({
@@ -65,11 +69,16 @@ async fn test_activity_log_flow() -> Result<()> {
     let resp: Response = app.clone().oneshot(req).await?;
     let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await?;
     let project_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    let project_id = project_res.get("id").and_then(|v| v.as_str()).context("missing project id")?.to_string();
+    let project_id = project_res
+        .get("id")
+        .and_then(|v| v.as_str())
+        .context("missing project id")?
+        .to_string();
 
     // 4. Create Task (should trigger "task.created" log)
     let task_payload = TaskCreateRequest {
         title: "Audit This Task".to_string(),
+        description: None,
         status: Some("pending".to_string()),
         due_date: None,
         start_date: Some(Utc::now()),
@@ -97,9 +106,11 @@ async fn test_activity_log_flow() -> Result<()> {
     for _ in 0..15 {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-        let rows: Vec<(String, String)> = sqlx::query_as("SELECT event_name, description FROM activity_log WHERE event_name = 'task.created'")
-            .fetch_all(&pool)
-            .await?;
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT event_name, description FROM activity_log WHERE event_name = 'task.created'",
+        )
+        .fetch_all(&pool)
+        .await?;
 
         if !rows.is_empty() {
             logs = rows;
@@ -107,7 +118,10 @@ async fn test_activity_log_flow() -> Result<()> {
         }
     }
 
-    assert!(!logs.is_empty(), "Activity log should contain task.created event");
+    assert!(
+        !logs.is_empty(),
+        "Activity log should contain task.created event"
+    );
     assert_eq!(logs[0].0, "task.created");
     assert_eq!(logs[0].1, "Task created");
 

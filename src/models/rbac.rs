@@ -22,9 +22,15 @@ pub struct Role {
 }
 
 impl Loggable for Role {
-    fn entity_type() -> &'static str { "role" }
-    fn subject_id(&self) -> Uuid { self.id }
-    fn severity(&self) -> Severity { Severity::Critical }
+    fn entity_type() -> &'static str {
+        "role"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -78,9 +84,15 @@ pub struct Permission {
 }
 
 impl Loggable for Permission {
-    fn entity_type() -> &'static str { "permission" }
-    fn subject_id(&self) -> Uuid { self.id }
-    fn severity(&self) -> Severity { Severity::Critical }
+    fn entity_type() -> &'static str {
+        "permission"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -124,9 +136,15 @@ pub struct UserRole {
 }
 
 impl Loggable for UserRole {
-    fn entity_type() -> &'static str { "user_role" }
-    fn subject_id(&self) -> Uuid { self.user_id }
-    fn severity(&self) -> Severity { Severity::Critical }
+    fn entity_type() -> &'static str {
+        "user_role"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.user_id
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -151,9 +169,15 @@ pub struct UserPermission {
 }
 
 impl Loggable for UserPermission {
-    fn entity_type() -> &'static str { "user_permission" }
-    fn subject_id(&self) -> Uuid { self.user_id }
-    fn severity(&self) -> Severity { Severity::Critical }
+    fn entity_type() -> &'static str {
+        "user_permission"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.user_id
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -177,9 +201,15 @@ pub struct RolePermission {
 }
 
 impl Loggable for RolePermission {
-    fn entity_type() -> &'static str { "role_permission" }
-    fn subject_id(&self) -> Uuid { self.role_id }
-    fn severity(&self) -> Severity { Severity::Critical }
+    fn entity_type() -> &'static str {
+        "role_permission"
+    }
+    fn subject_id(&self) -> Uuid {
+        self.role_id
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

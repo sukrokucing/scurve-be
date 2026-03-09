@@ -35,14 +35,22 @@ async fn test_cycle_detection_returns_error() -> anyhow::Result<()> {
         .bind(Uuid::new_v4().to_string()).bind(c.to_string()).bind(a.to_string()).execute(&pool).await?;
 
     // Call endpoint and expect an error
+    use axum::extract::{Path as AxPath, State as AxState};
     use s_curve::app::AppState;
+    use s_curve::jwt::{AuthUser, JwtConfig};
     use s_curve::routes::projects::get_project_critical_path;
-    use s_curve::jwt::{JwtConfig, AuthUser};
-    use axum::extract::{State as AxState, Path as AxPath};
 
-    let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
+    let jwt = JwtConfig {
+        secret: std::sync::Arc::new(b"test-secret".to_vec()),
+        exp_hours: 24,
+    };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
+    let app_state = AppState::new(
+        pool.clone(),
+        jwt,
+        event_bus,
+        s_curve::authz::RoutePermissionCache::new(),
+    );
     let auth = AuthUser { user_id };
 
     let path = AxPath(project_id);
@@ -92,14 +100,22 @@ async fn test_disconnected_graph_picks_longest_component() -> anyhow::Result<()>
     sqlx::query("INSERT INTO task_dependencies (id, source_task_id, target_task_id, created_at) VALUES (?, ?, ?, datetime('now'))")
         .bind(Uuid::new_v4().to_string()).bind(d.to_string()).bind(e.to_string()).execute(&pool).await?;
 
+    use axum::extract::{Path as AxPath, State as AxState};
     use s_curve::app::AppState;
+    use s_curve::jwt::{AuthUser, JwtConfig};
     use s_curve::routes::projects::get_project_critical_path;
-    use s_curve::jwt::{JwtConfig, AuthUser};
-    use axum::extract::{State as AxState, Path as AxPath};
 
-    let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
+    let jwt = JwtConfig {
+        secret: std::sync::Arc::new(b"test-secret".to_vec()),
+        exp_hours: 24,
+    };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
+    let app_state = AppState::new(
+        pool.clone(),
+        jwt,
+        event_bus,
+        s_curve::authz::RoutePermissionCache::new(),
+    );
     let auth = AuthUser { user_id };
 
     // call endpoint
@@ -157,14 +173,22 @@ async fn test_equal_length_paths_returns_valid_path_of_expected_length() -> anyh
     sqlx::query("INSERT INTO task_dependencies (id, source_task_id, target_task_id, created_at) VALUES (?, ?, ?, datetime('now'))")
         .bind(Uuid::new_v4().to_string()).bind(x.to_string()).bind(y.to_string()).execute(&pool).await?;
 
+    use axum::extract::{Path as AxPath, State as AxState};
     use s_curve::app::AppState;
+    use s_curve::jwt::{AuthUser, JwtConfig};
     use s_curve::routes::projects::get_project_critical_path;
-    use s_curve::jwt::{JwtConfig, AuthUser};
-    use axum::extract::{State as AxState, Path as AxPath};
 
-    let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
+    let jwt = JwtConfig {
+        secret: std::sync::Arc::new(b"test-secret".to_vec()),
+        exp_hours: 24,
+    };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
+    let app_state = AppState::new(
+        pool.clone(),
+        jwt,
+        event_bus,
+        s_curve::authz::RoutePermissionCache::new(),
+    );
     let auth = AuthUser { user_id };
 
     let path = AxPath(project_id);
@@ -175,8 +199,11 @@ async fn test_equal_length_paths_returns_valid_path_of_expected_length() -> anyh
     // We assert the length and that nodes form a valid chained path.
     let mut total_duration: i64 = 0;
     for id in ids.iter() {
-        let dur: i64 = sqlx::query_scalar("SELECT COALESCE(duration_days, 0) FROM tasks WHERE id = ?")
-            .bind(id.to_string()).fetch_one(&pool).await?;
+        let dur: i64 =
+            sqlx::query_scalar("SELECT COALESCE(duration_days, 0) FROM tasks WHERE id = ?")
+                .bind(id.to_string())
+                .fetch_one(&pool)
+                .await?;
         total_duration += dur;
     }
 
@@ -187,7 +214,11 @@ async fn test_equal_length_paths_returns_valid_path_of_expected_length() -> anyh
         let tgt = w[1];
         let exists: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies WHERE source_task_id = ? AND target_task_id = ?")
             .bind(src.to_string()).bind(tgt.to_string()).fetch_one(&pool).await?;
-        assert_eq!(exists, 1, "consecutive pair {:?}->{:?} must be a dependency", src, tgt);
+        assert_eq!(
+            exists, 1,
+            "consecutive pair {:?}->{:?} must be a dependency",
+            src, tgt
+        );
     }
 
     Ok(())
@@ -222,14 +253,22 @@ async fn test_zero_duration_tasks() -> anyhow::Result<()> {
     sqlx::query("INSERT INTO task_dependencies (id, source_task_id, target_task_id, created_at) VALUES (?, ?, ?, datetime('now'))")
         .bind(Uuid::new_v4().to_string()).bind(b.to_string()).bind(c.to_string()).execute(&pool).await?;
 
+    use axum::extract::{Path as AxPath, State as AxState};
     use s_curve::app::AppState;
+    use s_curve::jwt::{AuthUser, JwtConfig};
     use s_curve::routes::projects::get_project_critical_path;
-    use s_curve::jwt::{JwtConfig, AuthUser};
-    use axum::extract::{State as AxState, Path as AxPath};
 
-    let jwt = JwtConfig { secret: std::sync::Arc::new(b"test-secret".to_vec()), exp_hours: 24 };
+    let jwt = JwtConfig {
+        secret: std::sync::Arc::new(b"test-secret".to_vec()),
+        exp_hours: 24,
+    };
     let (event_bus, _rx) = tokio::sync::broadcast::channel(16);
-    let app_state = AppState::new(pool.clone(), jwt, event_bus, s_curve::authz::RoutePermissionCache::new());
+    let app_state = AppState::new(
+        pool.clone(),
+        jwt,
+        event_bus,
+        s_curve::authz::RoutePermissionCache::new(),
+    );
     let auth = AuthUser { user_id };
 
     let path = AxPath(project_id);
@@ -239,13 +278,20 @@ async fn test_zero_duration_tasks() -> anyhow::Result<()> {
     // All durations zero; algorithm maximizes sum of durations (0), so it may return
     // a single node or a chain. Accept any valid path with total duration 0 and
     // length between 1 and 3, and validate chaining.
-    assert!(ids.len() >= 1 && ids.len() <= 3, "unexpected path length: {}", ids.len());
+    assert!(
+        ids.len() >= 1 && ids.len() <= 3,
+        "unexpected path length: {}",
+        ids.len()
+    );
 
     // Ensure total duration is 0
     let mut total: i64 = 0;
     for id in ids.iter() {
-        let dur: i64 = sqlx::query_scalar("SELECT COALESCE(duration_days, 0) FROM tasks WHERE id = ?")
-            .bind(id.to_string()).fetch_one(&pool).await?;
+        let dur: i64 =
+            sqlx::query_scalar("SELECT COALESCE(duration_days, 0) FROM tasks WHERE id = ?")
+                .bind(id.to_string())
+                .fetch_one(&pool)
+                .await?;
         total += dur;
     }
     assert_eq!(total, 0);
@@ -256,7 +302,11 @@ async fn test_zero_duration_tasks() -> anyhow::Result<()> {
         let tgt = w[1];
         let exists: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies WHERE source_task_id = ? AND target_task_id = ?")
             .bind(src.to_string()).bind(tgt.to_string()).fetch_one(&pool).await?;
-        assert_eq!(exists, 1, "consecutive pair {:?}->{:?} must be a dependency", src, tgt);
+        assert_eq!(
+            exists, 1,
+            "consecutive pair {:?}->{:?} must be a dependency",
+            src, tgt
+        );
     }
 
     Ok(())

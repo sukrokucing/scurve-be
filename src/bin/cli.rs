@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
 use chrono::Utc;
+use clap::{Parser, Subcommand};
 use dotenvy::dotenv;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
@@ -116,14 +116,18 @@ async fn print_status(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> 
     // use std::collections::HashMap;
 
     // If the migrations table doesn't exist, nothing is applied yet
-    let db_applied = sqlx::query!("SELECT name FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'")
-        .fetch_optional(pool)
-        .await?;
+    let db_applied = sqlx::query!(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'"
+    )
+    .fetch_optional(pool)
+    .await?;
     let applied_versions: HashSet<i64> = if db_applied.is_some() {
         let rows = sqlx::query("SELECT version FROM _sqlx_migrations WHERE success = 1")
             .fetch_all(pool)
             .await?;
-        rows.iter().filter_map(|row| row.try_get::<i64, _>("version").ok()).collect()
+        rows.iter()
+            .filter_map(|row| row.try_get::<i64, _>("version").ok())
+            .collect()
     } else {
         HashSet::new()
     };
@@ -134,11 +138,7 @@ async fn print_status(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> 
         let applied = applied_versions.contains(&version);
         let status = if applied { "applied" } else { "pending" };
         let desc = migration.description.as_ref().trim();
-        let name = if !desc.is_empty() {
-            desc
-        } else {
-            "unknown"
-        };
+        let name = if !desc.is_empty() { desc } else { "unknown" };
         println!("{:<8} {:<20} {}", status, version, name);
     }
 

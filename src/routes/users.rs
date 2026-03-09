@@ -6,10 +6,10 @@ use axum::{
 use serde::Deserialize;
 
 use crate::app::AppState;
+use crate::db::{row_parsers, uuid_sql};
 use crate::errors::AppError;
 use crate::jwt::AuthUser;
 use crate::models::user::User;
-use crate::db::{uuid_sql, row_parsers};
 
 #[derive(Debug, Deserialize)]
 pub struct ListUsersQuery {
@@ -70,7 +70,7 @@ pub async fn list_users(
             .await?;
 
         let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE (name LIKE ? OR email LIKE ?) AND deleted_at IS NULL"
+            "SELECT COUNT(*) FROM users WHERE (name LIKE ? OR email LIKE ?) AND deleted_at IS NULL",
         )
         .bind(&search_pattern)
         .bind(&search_pattern)
@@ -167,10 +167,11 @@ pub async fn create_user(
     use crate::utils::{hash_password, utc_now};
 
     // Check email uniqueness
-    let existing: Option<i64> = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = ? AND deleted_at IS NULL")
-        .bind(&payload.email)
-        .fetch_one(&state.pool)
-        .await?;
+    let existing: Option<i64> =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = ? AND deleted_at IS NULL")
+            .bind(&payload.email)
+            .fetch_one(&state.pool)
+            .await?;
 
     if existing.unwrap_or(0) > 0 {
         return Err(AppError::conflict("Email already in use"));
@@ -240,11 +241,13 @@ pub async fn update_user(
 
     if let Some(ref email) = payload.email {
         // Check email uniqueness (excluding current user)
-        let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = ? AND id != ? AND deleted_at IS NULL")
-            .bind(email)
-            .bind(id.to_string())
-            .fetch_one(&state.pool)
-            .await?;
+        let existing: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE email = ? AND id != ? AND deleted_at IS NULL",
+        )
+        .bind(email)
+        .bind(id.to_string())
+        .fetch_one(&state.pool)
+        .await?;
 
         if existing > 0 {
             return Err(AppError::conflict("Email already in use"));
@@ -307,7 +310,9 @@ pub async fn delete_user(
         .execute(&state.pool)
         .await?;
 
-    Ok(Json(DeletedResponse { message: "User deleted".to_string() }))
+    Ok(Json(DeletedResponse {
+        message: "User deleted".to_string(),
+    }))
 }
 
 // --- Helper ---

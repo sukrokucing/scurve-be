@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::SqlitePool;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -11,10 +11,14 @@ const MUTABLE_TABLES: &[&str] = &[
     "password_reset_tokens",
     "stale_important_logs",
     "stale_noise_logs",
+    "telemetry_events",
     "task_progress",
     "task_dependencies",
     "tasks",
     "project_plan",
+    "project_members",
+    "s_curve_stage_rules",
+    "s_curve_stage_rule_sets",
     "projects",
     "role_permissions",
     "user_permissions",
@@ -62,7 +66,9 @@ pub async fn cloned_clean_db() -> Result<TestDb> {
 }
 
 async fn reset_mutable_tables(pool: &SqlitePool) -> Result<()> {
-    sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(pool)
+        .await?;
 
     for table in MUTABLE_TABLES {
         let exists: Option<String> =
@@ -77,6 +83,8 @@ async fn reset_mutable_tables(pool: &SqlitePool) -> Result<()> {
     }
 
     // Keep FK enforcement disabled to match existing integration test behavior.
-    sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(pool)
+        .await?;
     Ok(())
 }

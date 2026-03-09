@@ -4,9 +4,9 @@ use axum::{
     http::{Request, StatusCode},
     response::Response,
 };
+use s_curve::create_app;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use s_curve::create_app;
 
 mod support;
 
@@ -54,7 +54,11 @@ async fn test_password_reset_flow() -> Result<()> {
     let msg = msg_json["message"].as_str().context("missing message")?;
 
     // Parse token from "Reset token (dev only): <token>"
-    let token = msg.split(": ").nth(1).context("failed to parse token from message")?.trim();
+    let token = msg
+        .split(": ")
+        .nth(1)
+        .context("failed to parse token from message")?
+        .trim();
     println!("Got reset token: {}", token);
 
     // 4. Use Token to Reset Password
