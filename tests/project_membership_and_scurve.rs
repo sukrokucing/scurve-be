@@ -335,3 +335,41 @@ async fn s_curve_health_and_portfolio_summary_return_expected_shape() -> anyhow:
 
     Ok(())
 }
+
+#[tokio::test]
+async fn users_me_projects_returns_project_scope_rows() -> anyhow::Result<()> {
+    let (app, pool, jwt_config, _test_db) = setup().await?;
+
+    let user_id = seed_user(&pool, "Scope User", "scope-user@example.com").await?;
+    let token = jwt_config.encode(user_id)?;
+    let project_id = create_project_via_api(&app, &token, "Scope Project").await?;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/users/me/projects")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body::to_bytes(res.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&body)?;
+    let items = payload
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("expected array response"))?;
+    assert!(
+        items
+            .iter()
+            .any(|item| item.get("project_id").and_then(Value::as_str)
+                == Some(&project_id.to_string())),
+        "expected project_id {} in /users/me/projects response: {}",
+        project_id,
+        payload
+    );
+
+    Ok(())
+}

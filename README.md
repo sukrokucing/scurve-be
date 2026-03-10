@@ -19,6 +19,10 @@ Modular Axum backend for project/task management with JWT auth, SQLite (SQLx), R
 cp .env.example .env
 
 # run API (applies migrations on startup)
+# faster compile/startup for daily development
+cargo run --profile local-release
+
+# production-like build profile
 cargo run --release
 ```
 
@@ -50,6 +54,12 @@ docker exec rust-service cargo run \
 docker exec rust-service env RUST_BACKTRACE=1 \
   CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
   cargo run --manifest-path /apps/scurve-be/Cargo.toml \
+  --target-dir /apps/scurve-be/target --profile local-release
+
+# 4) optional production-like startup
+docker exec rust-service env RUST_BACKTRACE=1 \
+  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
+  cargo run --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target --release
 ```
 
@@ -63,6 +73,36 @@ Important:
 
 - Prefer `docker exec rust-service cargo ...` over `docker exec ... sh -lc 'cargo ...'`.
 - In this container, `sh -lc` may not include Cargo in `PATH`.
+
+### Faster Docker compile/restart
+
+If you restart the API frequently, compile once and run the binary directly:
+
+```bash
+# compile once
+docker exec rust-service cargo build \
+  --manifest-path /apps/scurve-be/Cargo.toml \
+  --target-dir /apps/scurve-be/target \
+  --profile local-release
+
+# start without invoking Cargo
+docker exec rust-service env RUST_BACKTRACE=1 \
+  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
+  /apps/scurve-be/target/local-release/s-curve
+```
+
+Production-like variant:
+
+```bash
+docker exec rust-service cargo build \
+  --manifest-path /apps/scurve-be/Cargo.toml \
+  --target-dir /apps/scurve-be/target \
+  --release
+
+docker exec rust-service env RUST_BACKTRACE=1 \
+  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
+  /apps/scurve-be/target/release/s-curve
+```
 
 ## Configuration
 

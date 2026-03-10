@@ -25,6 +25,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 const DEFAULT_THEME: &str = "#3498db";
+const PROJECT_OWNER_ROLE: &str = "project_owner";
 
 #[utoipa::path(
     get,
@@ -120,19 +121,47 @@ pub async fn create_project(
         .execute(&state.pool)
         .await?;
 
-    sqlx::query(
+    let owner_role_id: String = sqlx::query_scalar("SELECT id FROM roles WHERE name = ? LIMIT 1")
+        .bind(PROJECT_OWNER_ROLE)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| {
+            AppError::internal("project_owner role not found; run latest migrations".to_string())
+        })?;
+
+    let match_project = uuid_sql::match_uuid_clause("id");
+    let match_member_user = uuid_sql::match_uuid_clause("id");
+    let match_actor_user = uuid_sql::match_uuid_clause("id");
+    let membership_sql = format!(
         "INSERT INTO project_members (id, project_id, user_id, role_id, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, '00000000-0000-0000-0000-000000000006', ?, ?, ?, ?)"
-    )
-    .bind(Uuid::new_v4().to_string())
-    .bind(project_id.to_string())
-    .bind(auth.user_id.to_string())
-    .bind(now)
-    .bind(auth.user_id.to_string())
-    .bind(now)
-    .bind(auth.user_id.to_string())
-    .execute(&state.pool)
-    .await?;
+         VALUES (
+            ?,
+            (SELECT id FROM projects WHERE {}),
+            (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+            ?,
+            ?,
+            (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+            ?,
+            (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+         )",
+        match_project, match_member_user, match_actor_user, match_actor_user
+    );
+
+    sqlx::query(&membership_sql)
+        .bind(Uuid::new_v4().to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(owner_role_id)
+        .bind(now)
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(now)
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
+        .execute(&state.pool)
+        .await?;
 
     let project = fetch_project(&state.pool, auth.user_id, project_id).await?;
     let project: Project = project.try_into()?;
@@ -796,15 +825,18 @@ pub async fn create_project_member(
         let deleted_at: Option<String> = row.try_get("deleted_at")?;
         if deleted_at.is_some() {
             let match_id = uuid_sql::match_uuid_clause("id");
+            let actor_match = uuid_sql::match_uuid_clause("id");
             let sql = format!(
                 "UPDATE project_members
-                 SET role_id = ?, deleted_at = NULL, deleted_by = NULL, updated_at = ?, updated_by = ?
+                 SET role_id = ?, deleted_at = NULL, deleted_by = NULL, updated_at = ?,
+                     updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
                  WHERE {}",
-                match_id
+                actor_match, match_id
             );
             sqlx::query(&sql)
                 .bind(payload.role_id.to_string())
                 .bind(now)
+                .bind(auth.user_id.to_string())
                 .bind(auth.user_id.to_string())
                 .bind(id.clone())
                 .bind(id)
@@ -812,15 +844,18 @@ pub async fn create_project_member(
                 .await?;
         } else {
             let match_id = uuid_sql::match_uuid_clause("id");
+            let actor_match = uuid_sql::match_uuid_clause("id");
             let sql = format!(
                 "UPDATE project_members
-                 SET role_id = ?, updated_at = ?, updated_by = ?
+                 SET role_id = ?, updated_at = ?,
+                     updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
                  WHERE {}",
-                match_id
+                actor_match, match_id
             );
             sqlx::query(&sql)
                 .bind(payload.role_id.to_string())
                 .bind(now)
+                .bind(auth.user_id.to_string())
                 .bind(auth.user_id.to_string())
                 .bind(id.clone())
                 .bind(id)
@@ -829,15 +864,22 @@ pub async fn create_project_member(
         }
     } else {
         let project_match = uuid_sql::match_uuid_clause("id");
+        let user_match = uuid_sql::match_uuid_clause("id");
+        let actor_match = uuid_sql::match_uuid_clause("id");
         let insert_sql = format!(
             "INSERT INTO project_members (
                 id, project_id, user_id, role_id, created_at, created_by, updated_at, updated_by
              ) VALUES (
                 ?,
                 (SELECT id FROM projects WHERE {} AND deleted_at IS NULL),
-                ?, ?, ?, ?, ?, ?
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                ?,
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
              )",
-            project_match
+            project_match, user_match, actor_match, actor_match
         );
 
         sqlx::query(&insert_sql)
@@ -845,10 +887,13 @@ pub async fn create_project_member(
             .bind(project_id.to_string())
             .bind(project_id.to_string())
             .bind(payload.user_id.to_string())
+            .bind(payload.user_id.to_string())
             .bind(payload.role_id.to_string())
             .bind(now)
             .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
             .bind(now)
+            .bind(auth.user_id.to_string())
             .bind(auth.user_id.to_string())
             .execute(&state.pool)
             .await?;
@@ -879,16 +924,22 @@ pub async fn delete_project_member(
     let now = utc_now();
     let match_project = uuid_sql::match_uuid_clause("project_id");
     let match_user = uuid_sql::match_uuid_clause("user_id");
+    let actor_match = uuid_sql::match_uuid_clause("id");
     let sql = format!(
         "UPDATE project_members
-         SET deleted_at = ?, deleted_by = ?, updated_at = ?, updated_by = ?
+         SET deleted_at = ?,
+             deleted_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+             updated_at = ?,
+             updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
          WHERE {} AND {} AND deleted_at IS NULL",
-        match_project, match_user
+        actor_match, actor_match, match_project, match_user
     );
     let affected = sqlx::query(&sql)
         .bind(now)
         .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
         .bind(now)
+        .bind(auth.user_id.to_string())
         .bind(auth.user_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
@@ -916,7 +967,7 @@ pub async fn list_my_project_scopes(
     auth: AuthUser,
 ) -> AppResult<Json<Vec<MyProjectScopeSummary>>> {
     let user_match = uuid_sql::match_uuid_clause("pm.user_id");
-    let project_case = uuid_sql::case_uuid("p.id");
+    let project_case = uuid_sql::case_uuid("pm.project_id");
     let role_case = uuid_sql::case_uuid("pm.role_id");
     let sql = format!(
         "SELECT

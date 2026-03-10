@@ -47,6 +47,15 @@ incremental = true   # Reuse previous compilation results
 strip = "symbols"    # Reduces binary size, faster linking on some systems
 panic = "abort"      # Removes unwinding code, faster compile + smaller binary
 
+[profile.local-release]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+strip = "none"
+debug = 0
+incremental = true
+
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
