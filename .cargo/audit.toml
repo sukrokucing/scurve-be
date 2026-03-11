@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+  # Triggered via sqlx's optional MySQL dependency in Cargo.lock; this project uses SQLite only.
+  "RUSTSEC-2023-0071",
+]
+informational_warnings = ["unmaintained", "yanked", "unsound"]

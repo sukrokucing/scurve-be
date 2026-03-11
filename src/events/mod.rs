@@ -218,6 +218,8 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
             .unwrap_or_else(Utc::now);
 
         let id = Uuid::new_v4().to_string();
+        let event_json_str =
+            serde_json::to_string(&event_json).unwrap_or_else(|_| "{}".to_string());
 
         // Phase 3: Insert into activity_log (projection)
         let result = sqlx::query(
@@ -232,7 +234,7 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
         .bind(&actor_id)
         .bind(&subject_id)
         .bind(occurred_at)
-        .bind(&event_json)
+        .bind(&event_json_str)
         .bind(severity)
         .execute(&pool)
         .await;
@@ -243,7 +245,7 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
 
         // Phase 6: Insert into event_store with hash chain
         let event_store_id = Uuid::new_v4();
-        let payload_str = serde_json::to_string(&event_json).unwrap_or_default();
+        let payload_str = event_json_str;
 
         // Get the previous hash from the last event
         let prev_hash_result: Option<String> =

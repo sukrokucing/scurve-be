@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use anyhow::Context;
 use anyhow::Result;
 use axum::body::{self, Body};
@@ -216,7 +218,7 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
         .get("actual")
         .and_then(|v| v.as_array())
         .context("missing actual array")?;
-    assert!(actual.len() >= 1);
+    assert!(!actual.is_empty());
     assert_eq!(dash_res["metric"], "progress");
     assert_eq!(dash_res["metric_supported"], true);
     assert_eq!(dash_res["data_status"], "ok");

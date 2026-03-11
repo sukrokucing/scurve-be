@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 //! Integration test for milestone detection via date normalization.
 //!
 //! Verifies that tasks with start_date == end_date (same calendar day) return

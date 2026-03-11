@@ -44,11 +44,9 @@ impl DefaultPolicyEvaluator {
                     tracing::debug!(scope_project, ctx_project = %ctx_project, "project_id mismatch");
                     return false;
                 }
-            } else {
-                if !ctx.allow_project_scoped_without_target {
-                    tracing::debug!(scope_project, "context missing project_id");
-                    return false;
-                }
+            } else if !ctx.allow_project_scoped_without_target {
+                tracing::debug!(scope_project, "context missing project_id");
+                return false;
             }
         }
 

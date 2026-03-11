@@ -201,8 +201,7 @@ pub async fn list_tasks(
             conditions.push("LOWER(t.status) = LOWER(?)".to_string());
             binds.push(statuses[0].to_string());
         } else {
-            let placeholders = std::iter::repeat("LOWER(?)")
-                .take(statuses.len())
+            let placeholders = std::iter::repeat_n("LOWER(?)", statuses.len())
                 .collect::<Vec<_>>()
                 .join(", ");
             conditions.push(format!("LOWER(t.status) IN ({})", placeholders));
@@ -334,7 +333,7 @@ pub async fn create_task(
     }
 
     if let Some(p) = payload.progress {
-        if p < 0 || p > 100 {
+        if !(0..=100).contains(&p) {
             return Err(AppError::bad_request("progress must be between 0 and 100"));
         }
     }
@@ -444,7 +443,7 @@ pub async fn update_task(
         task.parent_id = Some(pid);
     }
     if let Some(p) = progress {
-        if p < 0 || p > 100 {
+        if !(0..=100).contains(&p) {
             return Err(AppError::bad_request("progress must be between 0 and 100"));
         }
         task.progress = p;
@@ -1021,7 +1020,7 @@ pub async fn batch_update_tasks(
         }
 
         if let Some(p) = update.progress {
-            if p < 0 || p > 100 {
+            if !(0..=100).contains(&p) {
                 return Err(AppError::bad_request(format!(
                     "Task {}: progress must be between 0 and 100",
                     update.id
@@ -1088,8 +1087,7 @@ pub async fn batch_update_tasks(
     let assignee_case = uuid_sql::case_uuid("t.assignee");
     let parent_case = uuid_sql::case_uuid("t.parent_id");
 
-    let placeholders = std::iter::repeat("?")
-        .take(updated_ids.len())
+    let placeholders = std::iter::repeat_n("?", updated_ids.len())
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(

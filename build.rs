@@ -22,7 +22,7 @@ fn main() {
     for perm in permissions {
         let name = perm["name"].as_str().unwrap();
         let value = perm["value"].as_str().unwrap();
-        content.push_str(&format!("    pub const {}: &str = \"{}\";\n", name, value));
+        content.push_str(&format!("    pub const {name}: &str = \"{value}\";\n"));
     }
 
     fs::write(&dest_path, content).expect("Failed to write permissions_generated.rs");

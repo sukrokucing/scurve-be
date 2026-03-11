@@ -352,7 +352,7 @@ async fn fetch_user_by_id(pool: &sqlx::SqlitePool, user_id: uuid::Uuid) -> Resul
     .await?;
 
     if let Some(u) = simple {
-        return Ok(User::try_from(u)?);
+        return User::try_from(u);
     }
 
     // Fallback for blob/text mixed UUID storage
@@ -371,7 +371,7 @@ async fn fetch_user_by_id(pool: &sqlx::SqlitePool, user_id: uuid::Uuid) -> Resul
 
     if let Some(row) = fallback {
         let db_user = row_parsers::db_user_from_row(&row)?;
-        return Ok(User::try_from(db_user)?);
+        return User::try_from(db_user);
     }
 
     Err(AppError::not_found("User not found"))

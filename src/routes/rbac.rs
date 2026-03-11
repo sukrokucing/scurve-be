@@ -993,7 +993,7 @@ pub async fn list_audit_logs(
     use crate::db::uuid_sql;
 
     // Clamp per_page to max 100
-    let per_page = filter.per_page.min(100).max(1);
+    let per_page = filter.per_page.clamp(1, 100);
     let page = filter.page.max(1);
     let offset = (page - 1) * per_page;
 

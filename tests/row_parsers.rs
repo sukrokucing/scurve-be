@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use chrono::Utc;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;

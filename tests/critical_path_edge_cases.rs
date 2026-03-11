@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 mod support;
 
 use uuid::Uuid;
@@ -279,7 +281,7 @@ async fn test_zero_duration_tasks() -> anyhow::Result<()> {
     // a single node or a chain. Accept any valid path with total duration 0 and
     // length between 1 and 3, and validate chaining.
     assert!(
-        ids.len() >= 1 && ids.len() <= 3,
+        !ids.is_empty() && ids.len() <= 3,
         "unexpected path length: {}",
         ids.len()
     );

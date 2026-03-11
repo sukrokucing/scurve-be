@@ -1740,17 +1740,14 @@ async fn compute_project_s_curve_health(
     };
     let (rule_50_70_pass, rule_50_70_status) =
         compute_rule_50_70_status(metric, elapsed_time_pct, planned_pct, actual_pct);
-    let stage = resolve_stage(
-        pool,
-        project_id,
-        metric,
+    let stage_inputs = StageResolutionInputs {
         elapsed_time_pct,
         planned_pct,
         actual_pct,
         variance_pct,
         rule_50_70_pass,
-    )
-    .await?;
+    };
+    let stage = resolve_stage(pool, project_id, metric, &stage_inputs).await?;
 
     let data_status = if planned_pct.is_some() && actual_pct.is_some() {
         SCurveDataStatus::Ok
@@ -2050,11 +2047,7 @@ async fn resolve_stage(
     pool: &SqlitePool,
     project_id: Uuid,
     metric: SCurveMetric,
-    elapsed_time_pct: Option<f64>,
-    planned_pct: Option<f64>,
-    actual_pct: Option<f64>,
-    variance_pct: Option<f64>,
-    rule_50_70_pass: Option<bool>,
+    inputs: &StageResolutionInputs,
 ) -> AppResult<Option<SCurveStage>> {
     let metric_name = metric_to_str(metric);
     let project_match = uuid_sql::match_uuid_clause("rs.project_id");
@@ -2084,7 +2077,7 @@ async fn resolve_stage(
         .flatten();
 
     let Some(rule_set_id) = rule_set_id else {
-        return Ok(default_stage_from_variance(variance_pct));
+        return Ok(default_stage_from_variance(inputs.variance_pct));
     };
 
     let rows = sqlx::query(
@@ -2121,20 +2114,20 @@ async fn resolve_stage(
         let require_rule_50_70_pass_raw: Option<i64> = row.try_get("require_rule_50_70_pass")?;
         let require_rule_50_70_pass = require_rule_50_70_pass_raw.map(|v| v == 1);
 
-        if !value_in_range(elapsed_time_pct, elapsed_from, elapsed_to) {
+        if !value_in_range(inputs.elapsed_time_pct, elapsed_from, elapsed_to) {
             continue;
         }
-        if !value_in_range(planned_pct, planned_from, planned_to) {
+        if !value_in_range(inputs.planned_pct, planned_from, planned_to) {
             continue;
         }
-        if !value_in_range(actual_pct, actual_from, actual_to) {
+        if !value_in_range(inputs.actual_pct, actual_from, actual_to) {
             continue;
         }
-        if !value_in_range(variance_pct, variance_from, variance_to) {
+        if !value_in_range(inputs.variance_pct, variance_from, variance_to) {
             continue;
         }
         if let Some(required) = require_rule_50_70_pass {
-            if rule_50_70_pass != Some(required) {
+            if inputs.rule_50_70_pass != Some(required) {
                 continue;
             }
         }
@@ -2142,7 +2135,15 @@ async fn resolve_stage(
         return Ok(Some(stage));
     }
 
-    Ok(default_stage_from_variance(variance_pct))
+    Ok(default_stage_from_variance(inputs.variance_pct))
+}
+
+struct StageResolutionInputs {
+    elapsed_time_pct: Option<f64>,
+    planned_pct: Option<f64>,
+    actual_pct: Option<f64>,
+    variance_pct: Option<f64>,
+    rule_50_70_pass: Option<bool>,
 }
 
 fn value_in_range(value: Option<f64>, min: Option<f64>, max: Option<f64>) -> bool {

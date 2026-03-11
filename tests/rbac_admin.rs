@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use anyhow::{Context, Result};
 use axum::{
     body::Body,
@@ -85,7 +87,7 @@ async fn test_rbac_admin_lifecycle() -> Result<()> {
     let body: Value =
         serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await?)?;
     let roles = body.as_array().context("expected array")?;
-    assert!(roles.len() >= 1, "Should have seeded roles");
+    assert!(!roles.is_empty(), "Should have seeded roles");
 
     // 2. Create New Role
     let new_role_body = json!({

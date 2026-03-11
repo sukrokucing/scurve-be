@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use sqlx::Row;
 use std::collections::HashSet;
 use std::fs;
@@ -116,8 +118,8 @@ async fn print_status(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> 
     // use std::collections::HashMap;
 
     // If the migrations table doesn't exist, nothing is applied yet
-    let db_applied = sqlx::query!(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'"
+    let db_applied: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'",
     )
     .fetch_optional(pool)
     .await?;
@@ -132,7 +134,7 @@ async fn print_status(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> 
         HashSet::new()
     };
 
-    println!("{:<8} {:<20} {}", "Status", "Version", "Name");
+    println!("{:<8} {:<20} Name", "Status", "Version");
     for migration in migrator.iter() {
         let version = migration.version;
         let applied = applied_versions.contains(&version);

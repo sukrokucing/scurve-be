@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use anyhow::Context;
 use anyhow::Result;
 use axum::body::{self, Body};
@@ -189,7 +191,7 @@ async fn full_api_flow() -> Result<()> {
     }
     let list_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
     assert!(list_res.is_array());
-    assert!(list_res.as_array().unwrap().len() >= 1);
+    assert!(!list_res.as_array().unwrap().is_empty());
 
     // -- update progress
     let update_body = json!({"progress": 80});

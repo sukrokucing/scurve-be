@@ -102,7 +102,7 @@ impl RoutePermissionCache {
         for (path, item) in openapi.paths.paths.iter() {
             // Replace {param} with a dummy value that matches our regex [^/]+
             // e.g. /projects/{id} -> /projects/val
-            let test_path = path.replace(|c: char| c == '{' || c == '}', "");
+            let test_path = path.replace(['{', '}'], "");
 
             for (method_type, _operation) in item.operations.iter() {
                 let method_str = match method_type {

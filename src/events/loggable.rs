@@ -3,12 +3,13 @@ use uuid::Uuid;
 
 /// Severity levels for activity logs (Phase 5).
 /// Controls retention policies and log filtering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     /// Critical events: long-term retention, never auto-delete
     Critical,
     /// Important events: medium-term retention (default)
+    #[default]
     Important,
     /// Noise events: aggressively trimmed (e.g., 7 days)
     Noise,
@@ -22,12 +23,6 @@ impl Severity {
             Severity::Important => "important",
             Severity::Noise => "noise",
         }
-    }
-}
-
-impl Default for Severity {
-    fn default() -> Self {
-        Severity::Important
     }
 }
 

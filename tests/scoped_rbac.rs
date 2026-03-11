@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -154,7 +156,7 @@ async fn test_scoped_permission_enforcement() {
     };
     let req = Request::builder()
         .method("POST")
-        .uri(&format!("/rbac/users/{}/permissions", user_id))
+        .uri(format!("/rbac/users/{}/permissions", user_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", admin_token))
         .body(Body::from(
@@ -177,7 +179,7 @@ async fn test_scoped_permission_enforcement() {
 
     let req = Request::builder()
         .method("POST")
-        .uri(&format!("/rbac/users/{}/permissions", user_id))
+        .uri(format!("/rbac/users/{}/permissions", user_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", admin_token))
         .body(Body::from(serde_json::to_string(&grant_req_task).unwrap()))
@@ -188,7 +190,7 @@ async fn test_scoped_permission_enforcement() {
     // 5. Access Project A tasks (allowed)
     let req = Request::builder()
         .method("GET")
-        .uri(&format!("/projects/{}/tasks", project_a_id))
+        .uri(format!("/projects/{}/tasks", project_a_id))
         .header("Authorization", format!("Bearer {}", user_token))
         .body(Body::empty())
         .unwrap();
@@ -203,7 +205,7 @@ async fn test_scoped_permission_enforcement() {
     // 6. Access Project B tasks (denied due scoped permission mismatch)
     let req = Request::builder()
         .method("GET")
-        .uri(&format!("/projects/{}/tasks", project_b_id))
+        .uri(format!("/projects/{}/tasks", project_b_id))
         .header("Authorization", format!("Bearer {}", user_token))
         .body(Body::empty())
         .unwrap();

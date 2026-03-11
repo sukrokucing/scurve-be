@@ -350,7 +350,7 @@ async fn fetch_user_by_id(pool: &SqlitePool, user_id: uuid::Uuid) -> AppResult<D
         .await?;
 
     if let Some(row) = fallback {
-        return Ok(row_parsers::db_user_from_row(&row)?);
+        return row_parsers::db_user_from_row(&row);
     }
 
     Err(AppError::not_found("user not found"))

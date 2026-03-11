@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -18,7 +20,7 @@ fn canonical_pattern(path: &str) -> String {
     while let Some(ch) = chars.next() {
         if ch == '{' {
             out.push(':');
-            while let Some(inner) = chars.next() {
+            for inner in chars.by_ref() {
                 if inner == '}' {
                     break;
                 }

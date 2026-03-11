@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use anyhow::{Context, Result};
 use axum::body::{self, Body};
 use axum::http::{Request, StatusCode};

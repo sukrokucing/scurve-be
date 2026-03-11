@@ -180,7 +180,7 @@ use crate::models;
 pub struct ApiDoc;
 
 pub fn build_openapi(port: u16) -> anyhow::Result<utoipa::openapi::OpenApi> {
-    let mut doc = serde_json::to_value(&ApiDoc::openapi())?;
+    let mut doc = serde_json::to_value(ApiDoc::openapi())?;
 
     // Post-processing to refine the generated spec
     ensure_security_components(&mut doc);
