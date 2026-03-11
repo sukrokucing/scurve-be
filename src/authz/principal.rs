@@ -137,7 +137,7 @@ impl Principal {
                 {}
             FROM project_members pm
             INNER JOIN projects pr ON pr.id = pm.project_id
-            INNER JOIN role_permissions rp ON rp.role_id = pm.role_id
+            INNER JOIN role_permissions rp ON rp.role_id = pm.access_role_id
             INNER JOIN permissions p ON p.id = rp.permission_id
             WHERE {} AND pm.deleted_at IS NULL AND pr.deleted_at IS NULL
             "#,
@@ -252,7 +252,7 @@ mod tests {
                 id TEXT PRIMARY KEY,
                 project_id BLOB NOT NULL,
                 user_id BLOB NOT NULL,
-                role_id TEXT NOT NULL,
+                access_role_id TEXT NOT NULL,
                 deleted_at TEXT
             )",
         )
@@ -286,7 +286,7 @@ mod tests {
             .await?;
 
         sqlx::query(
-            "INSERT INTO project_members (id, project_id, user_id, role_id, deleted_at) VALUES (?, ?, ?, ?, NULL)",
+            "INSERT INTO project_members (id, project_id, user_id, access_role_id, deleted_at) VALUES (?, ?, ?, ?, NULL)",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(project_id.as_bytes().to_vec())

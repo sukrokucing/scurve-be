@@ -27,9 +27,9 @@ pub struct ListUsersQuery {
     path = "/users",
     tag = "Users",
     params(
-        ("q" = Option<String>, Query, description = "Optional search query (name or email)"),
-        ("page" = Option<u32>, Query, description = "Page number (1-based, default 1)"),
-        ("per_page" = Option<u32>, Query, description = "Items per page (default 25, max 100)"),
+        ("q" = Option<String>, Query, description = "Optional search query (name or email). Trimmed; max 128 characters. '%' and '_' are treated as literal characters."),
+        ("page" = Option<u32>, Query, description = "Page number (1-based, default 1). Values below 1 are treated as 1."),
+        ("per_page" = Option<u32>, Query, description = "Items per page (default 25). Clamped to 1..100."),
     ),
     responses(
         (status = 200, description = "List users", body = Vec<User>, headers(
@@ -44,18 +44,19 @@ pub async fn list_users(
     Query(params): Query<ListUsersQuery>,
 ) -> Result<(HeaderMap, Json<Vec<User>>), AppError> {
     let page = params.page.unwrap_or(1).max(1);
-    let per_page = params.per_page.unwrap_or(25).min(100);
+    let per_page = params.per_page.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * per_page;
+    let search_q = normalize_search_query(params.q)?;
 
     let id_case = uuid_sql::case_uuid("id");
 
-    let (rows, total_count) = if let Some(q) = params.q {
-        let search_pattern = format!("%{}%", q);
+    let (rows, total_count) = if let Some(q) = search_q {
+        let search_pattern = format!("%{}%", escape_like_pattern(&q));
 
         let sql = format!(
             "SELECT {}, name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at
              FROM users
-             WHERE (name LIKE ? OR email LIKE ?) AND deleted_at IS NULL
+             WHERE (name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\') AND deleted_at IS NULL
              ORDER BY name
              LIMIT ? OFFSET ?",
             id_case
@@ -70,7 +71,7 @@ pub async fn list_users(
             .await?;
 
         let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE (name LIKE ? OR email LIKE ?) AND deleted_at IS NULL",
+            "SELECT COUNT(*) FROM users WHERE (name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\') AND deleted_at IS NULL",
         )
         .bind(&search_pattern)
         .bind(&search_pattern)
@@ -111,6 +112,29 @@ pub async fn list_users(
     headers.insert("X-Total-Count", total_count.into());
 
     Ok((headers, Json(users)))
+}
+
+fn normalize_search_query(q: Option<String>) -> Result<Option<String>, AppError> {
+    match q {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            if trimmed.chars().count() > 128 {
+                return Err(AppError::bad_request("q must be at most 128 characters"));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn escape_like_pattern(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 // --- Request/Response Types ---

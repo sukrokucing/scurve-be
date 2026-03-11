@@ -57,6 +57,22 @@ async fn test_list_users_pagination_and_search() -> Result<()> {
     let resp2: Response = app.clone().oneshot(req2).await?;
     assert_eq!(resp2.status(), StatusCode::CREATED);
 
+    // 2b. Register a user containing SQL-LIKE wildcard characters in name.
+    let register_body3 = json!({
+        "name": "Percent 100% User",
+        "email": "percent@example.com",
+        "password": "password123"
+    });
+
+    let req3 = Request::builder()
+        .method("POST")
+        .uri("/auth/register")
+        .header("content-type", "application/json")
+        .body(Body::from(register_body3.to_string()))?;
+
+    let resp3: Response = app.clone().oneshot(req3).await?;
+    assert_eq!(resp3.status(), StatusCode::CREATED);
+
     // 3. List all users (should have at least 2)
     let req_list = Request::builder()
         .method("GET")
@@ -96,6 +112,34 @@ async fn test_list_users_pagination_and_search() -> Result<()> {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["name"], "Bob Admin");
 
+    // 4b. Search should trim whitespace.
+    let req_search_trimmed = Request::builder()
+        .method("GET")
+        .uri("/users?q=%20%20Bob%20%20")
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())?;
+
+    let resp_search_trimmed: Response = app.clone().oneshot(req_search_trimmed).await?;
+    assert_eq!(resp_search_trimmed.status(), StatusCode::OK);
+    let body_bytes = body::to_bytes(resp_search_trimmed.into_body(), 10_485_760).await?;
+    let trimmed_results: Vec<serde_json::Value> = serde_json::from_slice(&body_bytes)?;
+    assert_eq!(trimmed_results.len(), 1);
+    assert_eq!(trimmed_results[0]["name"], "Bob Admin");
+
+    // 4c. Wildcard characters are treated literally, not as "match all".
+    let req_search_percent = Request::builder()
+        .method("GET")
+        .uri("/users?q=%25")
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())?;
+
+    let resp_search_percent: Response = app.clone().oneshot(req_search_percent).await?;
+    assert_eq!(resp_search_percent.status(), StatusCode::OK);
+    let body_bytes = body::to_bytes(resp_search_percent.into_body(), 10_485_760).await?;
+    let percent_results: Vec<serde_json::Value> = serde_json::from_slice(&body_bytes)?;
+    assert_eq!(percent_results.len(), 1);
+    assert_eq!(percent_results[0]["name"], "Percent 100% User");
+
     // 5. Test pagination
     let req_pag = Request::builder()
         .method("GET")
@@ -109,6 +153,29 @@ async fn test_list_users_pagination_and_search() -> Result<()> {
     let body_bytes = body::to_bytes(resp_pag.into_body(), 10_485_760).await?;
     let pag_results: Vec<serde_json::Value> = serde_json::from_slice(&body_bytes)?;
     assert_eq!(pag_results.len(), 1);
+
+    // 5b. per_page below minimum is clamped to 1.
+    let req_pag_zero = Request::builder()
+        .method("GET")
+        .uri("/users?per_page=0")
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())?;
+
+    let resp_pag_zero: Response = app.clone().oneshot(req_pag_zero).await?;
+    assert_eq!(resp_pag_zero.status(), StatusCode::OK);
+    let body_bytes = body::to_bytes(resp_pag_zero.into_body(), 10_485_760).await?;
+    let pag_zero_results: Vec<serde_json::Value> = serde_json::from_slice(&body_bytes)?;
+    assert_eq!(pag_zero_results.len(), 1);
+
+    // 6. Excessive query length should be rejected.
+    let long_q = "a".repeat(129);
+    let req_too_long = Request::builder()
+        .method("GET")
+        .uri(format!("/users?q={}", long_q))
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())?;
+    let resp_too_long: Response = app.clone().oneshot(req_too_long).await?;
+    assert_eq!(resp_too_long.status(), StatusCode::BAD_REQUEST);
 
     Ok(())
 }

@@ -65,8 +65,14 @@ async fn create_project_via_api(app: &Router, token: &str, name: &str) -> anyhow
                 ))?,
         )
         .await?;
-    assert_eq!(res.status(), StatusCode::CREATED);
+    let status = res.status();
     let body = body::to_bytes(res.into_body(), usize::MAX).await?;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "project creation failed: {}",
+        String::from_utf8_lossy(&body)
+    );
     let payload: Value = serde_json::from_slice(&body)?;
     let project_id = payload
         .get("id")
@@ -113,14 +119,30 @@ async fn project_membership_delete_revokes_access() -> anyhow::Result<()> {
     let viewer_role_id: String = sqlx::query_scalar("SELECT id FROM roles WHERE name = 'viewer'")
         .fetch_one(&pool)
         .await?;
+    let unclassified_resource_role_id: String =
+        sqlx::query_scalar("SELECT id FROM resource_roles WHERE name = 'unclassified'")
+            .fetch_one(&pool)
+            .await?;
+    let membership_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO project_members (id, project_id, user_id, role_id, created_at, updated_at)
+        "INSERT INTO project_members (id, project_id, user_id, access_role_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .bind(Uuid::new_v4().to_string())
+    .bind(membership_id.to_string())
     .bind(project_id.to_string())
     .bind(member_id.to_string())
     .bind(viewer_role_id)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO project_member_resource_roles (id, membership_id, resource_role_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(membership_id.to_string())
+    .bind(unclassified_resource_role_id)
     .bind(now)
     .bind(now)
     .execute(&pool)
@@ -234,35 +256,67 @@ async fn s_curve_health_and_portfolio_summary_return_expected_shape() -> anyhow:
 
     let now = Utc::now();
     sqlx::query(
-        "INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO project_plan (id, project_id, date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(Uuid::new_v4().to_string())
     .bind(project_id.to_string())
     .bind((now - Duration::days(7)).to_rfc3339())
     .bind(30_i32)
+    .bind(40.0_f64)
+    .bind(4_000.0_f64)
+    .bind("USD")
     .bind(now)
     .bind(now)
     .execute(&pool)
     .await?;
     sqlx::query(
-        "INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO project_plan (id, project_id, date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(Uuid::new_v4().to_string())
     .bind(project_id.to_string())
     .bind((now + Duration::days(7)).to_rfc3339())
     .bind(80_i32)
+    .bind(100.0_f64)
+    .bind(10_000.0_f64)
+    .bind("USD")
     .bind(now)
     .bind(now)
     .execute(&pool)
     .await?;
+    let task_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO tasks (id, project_id, title, status, progress, created_at, updated_at)
          VALUES (?, ?, 'Health Task', 'doing', 55, ?, ?)",
     )
+    .bind(task_id.to_string())
+    .bind(project_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+    let unclassified_resource_role_id: String =
+        sqlx::query_scalar("SELECT id FROM resource_roles WHERE name = 'unclassified'")
+            .fetch_one(&pool)
+            .await?;
+    sqlx::query(
+        "INSERT INTO work_logs (
+            id, project_id, task_id, user_id, resource_role_id, hours,
+            hourly_rate_snapshot, currency_snapshot, cost_amount, work_date, note, source, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)",
+    )
     .bind(Uuid::new_v4().to_string())
     .bind(project_id.to_string())
+    .bind(task_id.to_string())
+    .bind(user_id.to_string())
+    .bind(unclassified_resource_role_id)
+    .bind(45.0_f64)
+    .bind(100.0_f64)
+    .bind("USD")
+    .bind(4_500.0_f64)
+    .bind(now.date_naive().to_string())
+    .bind("metric seed")
     .bind(now)
     .bind(now)
     .execute(&pool)
@@ -306,22 +360,52 @@ async fn s_curve_health_and_portfolio_summary_return_expected_shape() -> anyhow:
         .await?;
     assert_eq!(res.status(), StatusCode::OK);
     let body = body::to_bytes(res.into_body(), usize::MAX).await?;
-    let unsupported_health: Value = serde_json::from_slice(&body)?;
-    assert_eq!(unsupported_health["metric"], "hours");
-    assert!(unsupported_health["planned_pct"].is_null());
-    assert!(unsupported_health["actual_pct"].is_null());
-    assert!(unsupported_health["stage"].is_null());
+    let hours_health: Value = serde_json::from_slice(&body)?;
+    assert_eq!(hours_health["metric"], "hours");
+    assert_eq!(hours_health["metric_supported"], true);
+    assert_eq!(hours_health["data_status"], "ok");
+    assert!(hours_health["planned_pct"].is_number());
+    assert!(hours_health["actual_pct"].is_number());
+    assert!(hours_health["variance_pct"].is_number());
+    assert!(hours_health["stage"].is_string());
+    assert!(hours_health["rule_50_70_status"].is_string());
+    assert_eq!(hours_health["unit"], "hours");
     assert_eq!(
-        unsupported_health["rule_50_70_status"],
-        "unsupported_metric"
+        hours_health["planned_source"],
+        "project_plan.planned_hours (cumulative)"
     );
+    assert_eq!(hours_health["actual_source"], "work_logs.hours (sum)");
 
     let res = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/portfolio/s-curve/summary")
+                .uri(format!(
+                    "/projects/{}/s-curve/health?metric=cost",
+                    project_id
+                ))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body::to_bytes(res.into_body(), usize::MAX).await?;
+    let cost_health: Value = serde_json::from_slice(&body)?;
+    assert_eq!(cost_health["metric"], "cost");
+    assert_eq!(cost_health["metric_supported"], true);
+    assert_eq!(cost_health["data_status"], "ok");
+    assert!(cost_health["planned_pct"].is_number());
+    assert!(cost_health["actual_pct"].is_number());
+    assert_eq!(cost_health["currency"], "USD");
+    assert_eq!(cost_health["unit"], "currency");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/portfolio/s-curve/summary?metric=hours")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())?,
         )
@@ -329,9 +413,30 @@ async fn s_curve_health_and_portfolio_summary_return_expected_shape() -> anyhow:
     assert_eq!(res.status(), StatusCode::OK);
     let body = body::to_bytes(res.into_body(), usize::MAX).await?;
     let portfolio: Value = serde_json::from_slice(&body)?;
-    assert_eq!(portfolio["metric"], "progress");
+    assert_eq!(portfolio["metric"], "hours");
+    assert_eq!(portfolio["metric_supported"], true);
+    assert_eq!(portfolio["data_status"], "ok");
     assert_eq!(portfolio["project_count"], 1);
     assert_eq!(portfolio["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(portfolio["projects"][0]["data_status"], "ok");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/portfolio/s-curve/summary?metric=cost")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body::to_bytes(res.into_body(), usize::MAX).await?;
+    let portfolio_cost: Value = serde_json::from_slice(&body)?;
+    assert_eq!(portfolio_cost["metric"], "cost");
+    assert_eq!(portfolio_cost["metric_supported"], true);
+    assert_eq!(portfolio_cost["data_status"], "ok");
+    assert_eq!(portfolio_cost["currency"], "USD");
 
     Ok(())
 }

@@ -125,6 +125,7 @@ Common optional variables:
 
 - `CERT_PATH`, `KEY_PATH`: enable TLS (and browser HTTP/2 via ALPN)
 - `AUTHZ_MODE`: `off` | `advisory` | `strict`
+- `SCURVE_COST_CURRENCY`: fallback ISO currency code for cost metrics (default `USD`)
 - `SHOW_ERRORS`: include debug detail in error payloads when `true`/`1`
 - `AUTH_RATE_PER_SECOND`, `AUTH_BURST_SIZE`
 - `GLOBAL_RATE_PER_SECOND`, `GLOBAL_BURST_SIZE`
@@ -181,9 +182,14 @@ Auth flow in Swagger:
 | POST | `/auth/reset-password` | No | Reset password |
 | GET/POST | `/projects` | Yes | List/create projects |
 | GET/PUT/DELETE | `/projects/{id}` | Yes | Read/update/delete project |
-| GET | `/projects/{project_id}/members` | Yes | List active project members + role |
-| POST | `/projects/{project_id}/members` | Yes | Add/update project member role |
+| GET | `/projects/{project_id}/members` | Yes | List active project members + `access_role` + `resource_roles[]` |
+| POST | `/projects/{project_id}/members` | Yes | Add/update project member (`access_role_id`, `resource_role_ids[]`) |
 | DELETE | `/projects/{project_id}/members/{user_id}` | Yes | Soft-delete project membership |
+| GET | `/resource-roles` | Yes | List global resource role catalog |
+| POST | `/resource-roles` | Yes | Create global resource role |
+| PUT/DELETE | `/resource-roles/{id}` | Yes | Update/soft-delete global resource role |
+| GET | `/projects/{project_id}/resource-roles` | Yes | List effective resource roles + project override rates |
+| PUT/DELETE | `/projects/{project_id}/resource-roles/{resource_role_id}/rate` | Yes | Upsert/soft-delete project rate override |
 | GET/POST | `/projects/{project_id}/tasks` | Yes | List/create tasks |
 | DELETE | `/projects/{project_id}/tasks/batch` | Yes | Soft-delete multiple tasks atomically |
 | PUT/DELETE | `/projects/{project_id}/tasks/{id}` | Yes | Update/delete task |
@@ -191,8 +197,11 @@ Auth flow in Swagger:
 | GET | `/projects/{project_id}/assignees` | Yes | List distinct assignees used in project tasks |
 | GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | List/create progress |
 | PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | Update/delete progress |
+| GET/POST | `/projects/{project_id}/tasks/{task_id}/work-logs` | Yes | List/create economic work logs |
+| PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/work-logs/{id}` | Yes | Update/soft-delete work log |
 | GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
 | GET | `/users/me/projects` | Yes | My accessible projects + effective scoped permissions |
+| GET | `/projects/{id}/dashboard` | Yes | Dashboard payload with metric series (`metric=progress|hours|cost`) |
 | GET | `/projects/{id}/s-curve/health` | Yes | S-curve health (`metric=progress|hours|cost`) |
 | GET | `/portfolio/s-curve/summary` | Yes | Portfolio-level S-curve summary |
 | POST | `/telemetry/events` | Yes | Ingest frontend telemetry batch (idempotent by `event_id`) |
@@ -228,6 +237,12 @@ Legacy compatibility:
 - `Task`, `TaskCreateRequest`, and `TaskUpdateRequest` now include `description`.
 - On create, if `description` is missing/blank, backend auto-fills: `[Quick Add] {title}`.
 - On update, blank `description` is rejected with `400`.
+
+### Progress vs Work Logs
+
+- Progress endpoints now track `% progress` and optional `note` only.
+- `actual_hours` and `actual_cost` were removed from progress request/response schemas.
+- Hours/cost economics are captured via task `work-logs` with resource-role + rate snapshots.
 
 ## Development & Tests
 

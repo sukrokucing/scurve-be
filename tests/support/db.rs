@@ -17,6 +17,9 @@ const MUTABLE_TABLES: &[&str] = &[
     "tasks",
     "project_plan",
     "project_members",
+    "project_member_resource_roles",
+    "project_resource_role_rates",
+    "work_logs",
     "s_curve_stage_rules",
     "s_curve_stage_rule_sets",
     "projects",
@@ -55,6 +58,11 @@ pub async fn cloned_clean_db() -> Result<TestDb> {
         .create_if_missing(false)
         .foreign_keys(false);
     let pool = SqlitePool::connect_with(opts).await?;
+
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .context("failed to run migrations on cloned test database")?;
 
     reset_mutable_tables(&pool).await?;
 

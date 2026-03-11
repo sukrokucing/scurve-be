@@ -116,28 +116,37 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let pp1_uuid = Uuid::new_v4();
     let pp2_uuid = Uuid::new_v4();
 
-    sqlx::query("INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO project_plan (id, project_id, date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(pp1_uuid.to_string())
         .bind(project_uuid.to_string())
         .bind(&p1_date)
         .bind(10i32)
+        .bind(20.0_f64)
+        .bind(2000.0_f64)
+        .bind("USD")
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
         .execute(&pool)
         .await?;
 
-    sqlx::query("INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO project_plan (id, project_id, date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(pp2_uuid.to_string())
         .bind(project_uuid.to_string())
         .bind(&p2_date)
         .bind(50i32)
+        .bind(80.0_f64)
+        .bind(8000.0_f64)
+        .bind("USD")
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
         .execute(&pool)
         .await?;
 
     // create a progress entry via API (this will be included in actual aggregation)
-    let prog_body = json!({"progress": 42, "note": "initial"});
+    let prog_body = json!({
+        "progress": 42,
+        "note": "initial"
+    });
     let req = Request::builder()
         .method("POST")
         .uri(format!(
@@ -154,6 +163,28 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     if status != StatusCode::CREATED {
         panic!("progress create failed: {}", status);
     }
+
+    let unclassified_resource_role_id: String =
+        sqlx::query_scalar("SELECT id FROM resource_roles WHERE name = 'unclassified'")
+            .fetch_one(&pool)
+            .await?;
+    let work_log_body = json!({
+        "resource_role_id": unclassified_resource_role_id,
+        "hours": 30.0,
+        "work_date": now.date_naive().to_string(),
+        "note": "seed hours/cost"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/projects/{}/tasks/{}/work-logs",
+            project_id, task_id
+        ))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::from(work_log_body.to_string()))?;
+    let resp: Response = app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::CREATED);
 
     // call dashboard endpoint
     let req = Request::builder()
@@ -186,6 +217,60 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
         .and_then(|v| v.as_array())
         .context("missing actual array")?;
     assert!(actual.len() >= 1);
+    assert_eq!(dash_res["metric"], "progress");
+    assert_eq!(dash_res["metric_supported"], true);
+    assert_eq!(dash_res["data_status"], "ok");
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/projects/{}/dashboard?metric=hours", project_id))
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())?;
+
+    let resp: Response = app.clone().oneshot(req).await?;
+    let status = resp.status();
+    let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
+    if status != StatusCode::OK {
+        panic!(
+            "dashboard hours request failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
+    }
+    let hours_dash: serde_json::Value = serde_json::from_slice(&body_bytes)?;
+    assert_eq!(hours_dash["metric"], "hours");
+    assert_eq!(hours_dash["metric_supported"], true);
+    assert_eq!(hours_dash["data_status"], "ok");
+    assert!(hours_dash["metric_plan"].as_array().map_or(0, |v| v.len()) >= 2);
+    assert!(
+        hours_dash["metric_actual"]
+            .as_array()
+            .map_or(0, |v| v.len())
+            >= 1
+    );
+    assert_eq!(hours_dash["unit"], "hours");
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/projects/{}/dashboard?metric=cost", project_id))
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())?;
+
+    let resp: Response = app.clone().oneshot(req).await?;
+    let status = resp.status();
+    let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
+    if status != StatusCode::OK {
+        panic!(
+            "dashboard cost request failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
+    }
+    let cost_dash: serde_json::Value = serde_json::from_slice(&body_bytes)?;
+    assert_eq!(cost_dash["metric"], "cost");
+    assert_eq!(cost_dash["metric_supported"], true);
+    assert_eq!(cost_dash["data_status"], "ok");
+    assert_eq!(cost_dash["currency"], "USD");
 
     Ok(())
 }

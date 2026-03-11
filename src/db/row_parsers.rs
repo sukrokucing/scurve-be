@@ -9,6 +9,10 @@ use crate::models::{
     project_plan::DbProjectPlanPoint, task::DbTask, user::DbUser,
 };
 
+fn is_missing_column(err: &sqlx::Error, col: &str) -> bool {
+    matches!(err, sqlx::Error::ColumnNotFound(name) if name == col)
+}
+
 fn parse_datetime(s: &str) -> Result<DateTime<Utc>, AppError> {
     let s = s.trim();
 
@@ -86,8 +90,10 @@ fn get_required_text(row: &SqliteRow, col: &str) -> Result<String, AppError> {
 }
 
 fn get_optional_text(row: &SqliteRow, col: &str) -> Result<Option<String>, AppError> {
-    if let Ok(v) = row.try_get::<Option<String>, _>(col) {
-        return Ok(v);
+    match row.try_get::<Option<String>, _>(col) {
+        Ok(v) => return Ok(v),
+        Err(err) if is_missing_column(&err, col) => return Ok(None),
+        Err(_) => {}
     }
     if let Ok(v) = row.try_get::<Option<i64>, _>(col) {
         return Ok(v.map(|x| x.to_string()));
@@ -97,6 +103,32 @@ fn get_optional_text(row: &SqliteRow, col: &str) -> Result<Option<String>, AppEr
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(col) {
         return Ok(v.map(|bytes| String::from_utf8_lossy(&bytes).to_string()));
+    }
+
+    Err(AppError::internal(format!(
+        "missing {}: decode failed",
+        col
+    )))
+}
+
+fn get_optional_f64(row: &SqliteRow, col: &str) -> Result<Option<f64>, AppError> {
+    match row.try_get::<Option<f64>, _>(col) {
+        Ok(v) => return Ok(v),
+        Err(err) if is_missing_column(&err, col) => return Ok(None),
+        Err(_) => {}
+    }
+    if let Ok(v) = row.try_get::<Option<i64>, _>(col) {
+        return Ok(v.map(|x| x as f64));
+    }
+    if let Ok(v) = row.try_get::<Option<String>, _>(col) {
+        return match v {
+            Some(raw) => raw
+                .trim()
+                .parse::<f64>()
+                .map(Some)
+                .map_err(|e| AppError::internal(format!("invalid {}: {}", col, e))),
+            None => Ok(None),
+        };
     }
 
     Err(AppError::internal(format!(
@@ -381,6 +413,9 @@ pub fn db_project_plan_point_from_row(row: &SqliteRow) -> Result<DbProjectPlanPo
     let planned_progress: i32 = row
         .try_get("planned_progress")
         .map_err(|e| AppError::internal(format!("missing planned_progress: {}", e)))?;
+    let planned_hours = get_optional_f64(row, "planned_hours")?;
+    let planned_cost = get_optional_f64(row, "planned_cost")?;
+    let currency = get_optional_text(row, "currency")?;
     let created_at_s: String = row
         .try_get("created_at")
         .map_err(|e| AppError::internal(format!("missing created_at: {}", e)))?;
@@ -401,6 +436,9 @@ pub fn db_project_plan_point_from_row(row: &SqliteRow) -> Result<DbProjectPlanPo
         project_id,
         date,
         planned_progress,
+        planned_hours,
+        planned_cost,
+        currency,
         created_at,
         updated_at,
     })

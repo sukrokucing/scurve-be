@@ -21,6 +21,12 @@ use crate::models;
 				models::project_member::ProjectMember,
 				models::project_member::ProjectMemberCreateRequest,
 				models::project_member::MyProjectScopeSummary,
+				models::resource_role::ResourceRoleRef,
+				models::resource_role::ResourceRole,
+				models::resource_role::ResourceRoleCreateRequest,
+				models::resource_role::ResourceRoleUpdateRequest,
+				models::resource_role::ProjectResourceRoleRate,
+				models::resource_role::ProjectResourceRoleRateUpsertRequest,
 				models::task::Task,
 				models::task::TaskCreateRequest,
 				models::task::TaskUpdateRequest,
@@ -30,16 +36,21 @@ use crate::models;
 			models::task::TaskActivityEntry,
 			crate::routes::tasks::TaskSortBy,
 			crate::routes::tasks::TaskSortDir,
-			models::progress::Progress,
-			models::progress::ProgressCreateRequest,
-			models::progress::ProgressUpdateRequest,
-			models::dependency::TaskDependency,
-			models::dependency::DependencyCreateRequest,
-			models::task::TaskBatchUpdatePayload,
+				models::progress::Progress,
+				models::progress::ProgressCreateRequest,
+				models::progress::ProgressUpdateRequest,
+				models::work_log::WorkLogSource,
+				models::work_log::WorkLog,
+				models::work_log::WorkLogCreateRequest,
+				models::work_log::WorkLogUpdateRequest,
+				models::dependency::TaskDependency,
+				models::dependency::DependencyCreateRequest,
+				models::task::TaskBatchUpdatePayload,
 			models::task::TaskBatchUpdateRequest,
 			models::project_plan::ProjectPlanCreateRequest,
 			models::project_plan::ProjectPlanPoint,
 			crate::routes::projects::ActualPoint,
+			crate::routes::projects::DashboardMetricPoint,
 			crate::routes::projects::DashboardResponse,
 			crate::routes::projects::CriticalPathResponse,
 			crate::routes::health::HealthResponse,
@@ -69,6 +80,9 @@ use crate::models;
 				crate::models::telemetry::TelemetryIngestResponse,
 				crate::models::telemetry::TelemetryErrorResponse,
 				crate::models::s_curve::SCurveMetric,
+				crate::models::s_curve::SCurveStage,
+				crate::models::s_curve::SCurveDataStatus,
+				crate::models::s_curve::Rule5070Status,
 				crate::models::s_curve::SCurveHealthResponse,
 				crate::models::s_curve::PortfolioSCurveProjectSummary,
 				crate::models::s_curve::PortfolioSCurveSummaryResponse,
@@ -97,6 +111,13 @@ use crate::models;
 			crate::routes::projects::list_my_project_scopes,
 			crate::routes::projects::get_project_s_curve_health,
 			crate::routes::projects::get_portfolio_s_curve_summary,
+			crate::routes::resource_roles::list_resource_roles,
+			crate::routes::resource_roles::create_resource_role,
+			crate::routes::resource_roles::update_resource_role,
+			crate::routes::resource_roles::delete_resource_role,
+			crate::routes::resource_roles::list_project_resource_roles,
+			crate::routes::resource_roles::upsert_project_resource_role_rate,
+			crate::routes::resource_roles::delete_project_resource_role_rate,
 
 		crate::routes::tasks::list_tasks,
 		crate::routes::tasks::create_task,
@@ -118,6 +139,10 @@ use crate::models;
 		crate::routes::progress::create_progress,
 		crate::routes::progress::update_progress,
 		crate::routes::progress::delete_progress,
+		crate::routes::work_logs::list_work_logs,
+		crate::routes::work_logs::create_work_log,
+		crate::routes::work_logs::update_work_log,
+		crate::routes::work_logs::delete_work_log,
 		crate::routes::health::health,
 		crate::routes::telemetry::ingest_events,
 
@@ -430,15 +455,53 @@ fn apply_request_examples(operation: &mut Value) {
                     "22222222-2222-4222-8222-222222222222"
                 ]
             })),
-            "#/components/schemas/ProjectPlanCreateRequest" => {
-                Some(json!({ "date": "2025-12-01T00:00:00Z", "planned_progress": 10 }))
-            }
-            "#/components/schemas/ProgressCreateRequest" => {
-                Some(json!({ "progress": 50, "note": "Halfway there" }))
-            }
-            "#/components/schemas/ProgressUpdateRequest" => {
-                Some(json!({ "progress": 75, "note": "Adjusted after review" }))
-            }
+            "#/components/schemas/ProjectPlanCreateRequest" => Some(json!({
+                "date": "2025-12-01T00:00:00Z",
+                "planned_progress": 10,
+                "planned_hours": 120.5,
+                "planned_cost": 15200.0,
+                "currency": "USD"
+            })),
+            "#/components/schemas/ProgressCreateRequest" => Some(json!({
+                "progress": 50,
+                "note": "Halfway there"
+            })),
+            "#/components/schemas/ProgressUpdateRequest" => Some(json!({
+                "progress": 75,
+                "note": "Adjusted after review"
+            })),
+            "#/components/schemas/ProjectMemberCreateRequest" => Some(json!({
+                "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "access_role_id": "55555555-5555-4555-8555-555555555555",
+                "resource_role_ids": [
+                    "40000000-0000-0000-0000-000000000003",
+                    "40000000-0000-0000-0000-000000000006"
+                ]
+            })),
+            "#/components/schemas/ResourceRoleCreateRequest" => Some(json!({
+                "name": "data_engineer",
+                "description": "Builds and maintains project data pipelines",
+                "default_hourly_rate": 72.5,
+                "currency": "USD"
+            })),
+            "#/components/schemas/ResourceRoleUpdateRequest" => Some(json!({
+                "description": "Updated description",
+                "default_hourly_rate": 78.0
+            })),
+            "#/components/schemas/ProjectResourceRoleRateUpsertRequest" => Some(json!({
+                "hourly_rate": 88.0,
+                "currency": "USD"
+            })),
+            "#/components/schemas/WorkLogCreateRequest" => Some(json!({
+                "resource_role_id": "40000000-0000-0000-0000-000000000003",
+                "hours": 3.5,
+                "work_date": "2026-03-10",
+                "note": "Implemented pagination filters"
+            })),
+            "#/components/schemas/WorkLogUpdateRequest" => Some(json!({
+                "hours": 4.0,
+                "note": "Expanded to include sorting support"
+            })),
             "#/components/schemas/DependencyCreateRequest" => Some(json!({
                 "source_task_id": "11111111-1111-4111-8111-111111111111",
                 "target_task_id": "22222222-2222-4222-8222-222222222222",
@@ -628,6 +691,64 @@ fn apply_response_examples(operation: &mut Value) {
                         "note": "Execution started",
                         "created_at": "2025-01-19T09:00:00Z",
                         "updated_at": "2025-01-19T09:00:00Z"
+                    })),
+                    "#/components/schemas/WorkLog" => Some(json!({
+                        "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                        "project_id": "44444444-4444-4444-8444-444444444444",
+                        "task_id": "33333333-3333-4333-8333-333333333333",
+                        "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "user_name": "Ada Lovelace",
+                        "resource_role_id": "40000000-0000-0000-0000-000000000003",
+                        "resource_role_name": "backend_engineer",
+                        "hours": 4.0,
+                        "hourly_rate_snapshot": 88.0,
+                        "currency_snapshot": "USD",
+                        "cost_amount": 352.0,
+                        "work_date": "2026-03-10",
+                        "note": "Implemented server-side pagination",
+                        "source": "manual",
+                        "created_at": "2026-03-10T07:00:00Z",
+                        "updated_at": "2026-03-10T07:00:00Z",
+                        "deleted_at": null
+                    })),
+                    "#/components/schemas/ResourceRole" => Some(json!({
+                        "id": "40000000-0000-0000-0000-000000000003",
+                        "name": "backend_engineer",
+                        "description": "Backend engineering project contribution role",
+                        "default_hourly_rate": 70.0,
+                        "currency": "USD",
+                        "created_at": "2026-03-10T00:00:00Z",
+                        "updated_at": "2026-03-10T00:00:00Z"
+                    })),
+                    "#/components/schemas/ProjectResourceRoleRate" => Some(json!({
+                        "resource_role_id": "40000000-0000-0000-0000-000000000003",
+                        "resource_role_name": "backend_engineer",
+                        "hourly_rate": 88.0,
+                        "currency": "USD",
+                        "is_override": true
+                    })),
+                    "#/components/schemas/ProjectMember" => Some(json!({
+                        "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "user_name": "Ada Lovelace",
+                        "user_email": "ada@example.com",
+                        "access_role_id": "55555555-5555-4555-8555-555555555555",
+                        "access_role_name": "project_owner",
+                        "resource_roles": [
+                            { "id": "40000000-0000-0000-0000-000000000003", "name": "backend_engineer" },
+                            { "id": "40000000-0000-0000-0000-000000000006", "name": "project_manager" }
+                        ],
+                        "created_at": "2026-03-10T00:00:00Z",
+                        "updated_at": "2026-03-10T00:00:00Z"
+                    })),
+                    "#/components/schemas/MyProjectScopeSummary" => Some(json!({
+                        "project_id": "44444444-4444-4444-8444-444444444444",
+                        "project_name": "Launch Planning",
+                        "access_role_id": "55555555-5555-4555-8555-555555555555",
+                        "access_role_name": "project_owner",
+                        "resource_roles": [
+                            { "id": "40000000-0000-0000-0000-000000000003", "name": "backend_engineer" }
+                        ],
+                        "permissions": ["project.view", "task.create", "task.view", "progress.create", "progress.view"]
                     })),
                     "#/components/schemas/Role" => Some(json!({
                         "id": "55555555-5555-4555-8555-555555555555",

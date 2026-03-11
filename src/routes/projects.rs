@@ -17,8 +17,8 @@ use crate::models::project_member::{
 };
 use crate::models::project_plan::ProjectPlanPoint;
 use crate::models::s_curve::{
-    PortfolioSCurveProjectSummary, PortfolioSCurveSummaryResponse, SCurveHealthResponse,
-    SCurveMetric,
+    PortfolioSCurveProjectSummary, PortfolioSCurveSummaryResponse, Rule5070Status,
+    SCurveDataStatus, SCurveHealthResponse, SCurveMetric, SCurveStage,
 };
 use crate::utils::utc_now;
 use serde::Serialize;
@@ -26,6 +26,7 @@ use utoipa::ToSchema;
 
 const DEFAULT_THEME: &str = "#3498db";
 const PROJECT_OWNER_ROLE: &str = "project_owner";
+const UNCLASSIFIED_RESOURCE_ROLE_ID: &str = "40000000-0000-0000-0000-000000000001";
 
 #[utoipa::path(
     get,
@@ -133,7 +134,7 @@ pub async fn create_project(
     let match_member_user = uuid_sql::match_uuid_clause("id");
     let match_actor_user = uuid_sql::match_uuid_clause("id");
     let membership_sql = format!(
-        "INSERT INTO project_members (id, project_id, user_id, role_id, created_at, created_by, updated_at, updated_by)
+        "INSERT INTO project_members (id, project_id, user_id, access_role_id, created_at, created_by, updated_at, updated_by)
          VALUES (
             ?,
             (SELECT id FROM projects WHERE {}),
@@ -147,13 +148,43 @@ pub async fn create_project(
         match_project, match_member_user, match_actor_user, match_actor_user
     );
 
+    let membership_id = Uuid::new_v4();
     sqlx::query(&membership_sql)
-        .bind(Uuid::new_v4().to_string())
+        .bind(membership_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
         .bind(auth.user_id.to_string())
         .bind(auth.user_id.to_string())
         .bind(owner_role_id)
+        .bind(now)
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(now)
+        .bind(auth.user_id.to_string())
+        .bind(auth.user_id.to_string())
+        .execute(&state.pool)
+        .await?;
+
+    let actor_match = uuid_sql::match_uuid_clause("id");
+    let insert_member_role_sql = format!(
+        "INSERT INTO project_member_resource_roles (
+            id, membership_id, resource_role_id, created_at, created_by, updated_at, updated_by
+         ) VALUES (
+            ?,
+            ?,
+            ?,
+            ?,
+            (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+            ?,
+            (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+         )",
+        actor_match, actor_match
+    );
+
+    sqlx::query(&insert_member_role_sql)
+        .bind(Uuid::new_v4().to_string())
+        .bind(membership_id.to_string())
+        .bind(UNCLASSIFIED_RESOURCE_ROLE_ID)
         .bind(now)
         .bind(auth.user_id.to_string())
         .bind(auth.user_id.to_string())
@@ -365,17 +396,40 @@ pub struct ActualPoint {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub struct DashboardMetricPoint {
+    pub date: String,
+    pub value: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DashboardQuery {
+    pub metric: Option<SCurveMetric>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct DashboardResponse {
     pub project: Project,
     pub plan: Vec<ProjectPlanPoint>,
     pub actual: Vec<ActualPoint>,
+    pub metric: SCurveMetric,
+    pub metric_supported: bool,
+    pub data_status: SCurveDataStatus,
+    pub planned_source: Option<String>,
+    pub actual_source: Option<String>,
+    pub unit: Option<String>,
+    pub currency: Option<String>,
+    pub metric_plan: Vec<DashboardMetricPoint>,
+    pub metric_actual: Vec<DashboardMetricPoint>,
 }
 
 #[utoipa::path(
     get,
     path = "/projects/{id}/dashboard",
     tag = "Projects",
-    params(("id" = Uuid, Path, description = "Project id")),
+    params(
+        ("id" = Uuid, Path, description = "Project id"),
+        ("metric" = Option<SCurveMetric>, Query, description = "Metric type. Defaults to progress.")
+    ),
     responses((status = 200, description = "Project dashboard", body = DashboardResponse)),
     security(("bearerAuth" = []))
 )]
@@ -383,24 +437,70 @@ pub async fn get_project_dashboard(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
+    Query(query): Query<DashboardQuery>,
 ) -> AppResult<Json<DashboardResponse>> {
     // ensure project exists and belongs to user
     let db_project = fetch_project(&state.pool, auth.user_id, id).await?;
     let project: Project = db_project.try_into()?;
+    let metric = query.metric.unwrap_or(SCurveMetric::Progress);
 
-    // fetch planned points (using robust matching for project_id)
+    // Keep legacy dashboard fields for backward compatibility when metric=progress.
+    let (plan, actual) = if metric == SCurveMetric::Progress {
+        (
+            fetch_progress_dashboard_plan(&state.pool, id).await?,
+            fetch_progress_dashboard_actual(&state.pool, id).await?,
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    let metric_plan = fetch_dashboard_metric_plan_series(&state.pool, id, metric).await?;
+    let metric_actual = fetch_dashboard_metric_actual_series(&state.pool, id, metric).await?;
+    let data_status = if metric_plan.is_empty() || metric_actual.is_empty() {
+        SCurveDataStatus::InsufficientData
+    } else {
+        SCurveDataStatus::Ok
+    };
+    let (planned_source, actual_source, unit) = metric_series_metadata(metric);
+    let currency = match metric {
+        SCurveMetric::Cost => Some(resolve_cost_currency(&state.pool, id).await?),
+        _ => None,
+    };
+
+    let resp = DashboardResponse {
+        project,
+        plan,
+        actual,
+        metric,
+        metric_supported: true,
+        data_status,
+        planned_source: Some(planned_source.to_string()),
+        actual_source: Some(actual_source.to_string()),
+        unit: Some(unit.to_string()),
+        currency,
+        metric_plan,
+        metric_actual,
+    };
+
+    Ok(Json(resp))
+}
+
+async fn fetch_progress_dashboard_plan(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Vec<ProjectPlanPoint>> {
     let plan_id_case = uuid_sql::case_uuid("id");
     let plan_proj_case = uuid_sql::case_uuid("project_id");
     let plan_proj_match = uuid_sql::match_uuid_clause("project_id");
     let plan_sql = format!(
-        "SELECT {} , {} , date, planned_progress, created_at, updated_at FROM project_plan WHERE {} ORDER BY date ASC",
+        "SELECT {} , {} , date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at FROM project_plan WHERE {} ORDER BY date ASC",
         plan_id_case, plan_proj_case, plan_proj_match
     );
 
     let plan_rows = sqlx::query(&plan_sql)
-        .bind(id.to_string())
-        .bind(id.to_string())
-        .fetch_all(&state.pool)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(pool)
         .await?;
 
     let mut plan_pts = Vec::with_capacity(plan_rows.len());
@@ -408,38 +508,150 @@ pub async fn get_project_dashboard(
         plan_pts.push(row_parsers::db_project_plan_point_from_row(&row)?);
     }
 
-    let plan: Vec<ProjectPlanPoint> = plan_pts
+    plan_pts
         .into_iter()
         .map(ProjectPlanPoint::try_from)
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, _>>()
+}
 
-    // fetch actual aggregated progress per day (robust matching for project_id)
+async fn fetch_progress_dashboard_actual(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Vec<ActualPoint>> {
     let actual_proj_match = uuid_sql::match_uuid_clause("project_id");
     let actual_sql = format!(
         "SELECT DATE(created_at) as date, CAST(ROUND(AVG(progress)) AS INTEGER) as actual FROM task_progress WHERE {} AND deleted_at IS NULL GROUP BY DATE(created_at) ORDER BY DATE(created_at) ASC",
         actual_proj_match
     );
     let actual_rows = sqlx::query_as::<_, (String, i64)>(&actual_sql)
-        .bind(id.to_string())
-        .bind(id.to_string())
-        .fetch_all(&state.pool)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(pool)
         .await?;
 
-    let actual: Vec<ActualPoint> = actual_rows
+    Ok(actual_rows
         .into_iter()
         .map(|(date, actual)| ActualPoint {
             date,
             actual: actual as i32,
         })
-        .collect();
+        .collect())
+}
 
-    let resp = DashboardResponse {
-        project,
-        plan,
-        actual,
+async fn fetch_dashboard_metric_plan_series(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    metric: SCurveMetric,
+) -> AppResult<Vec<DashboardMetricPoint>> {
+    let column = match metric {
+        SCurveMetric::Progress => "planned_progress",
+        SCurveMetric::Hours => "planned_hours",
+        SCurveMetric::Cost => "planned_cost",
     };
 
-    Ok(Json(resp))
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "SELECT DATE(date) AS date, CAST({column} AS REAL) AS value
+         FROM project_plan
+         WHERE {match_proj} AND {column} IS NOT NULL
+         ORDER BY datetime(date) ASC"
+    );
+
+    let rows = sqlx::query_as::<_, (String, f64)>(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(date, value)| DashboardMetricPoint {
+            date,
+            value: round2(value),
+        })
+        .collect())
+}
+
+async fn fetch_dashboard_metric_actual_series(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    metric: SCurveMetric,
+) -> AppResult<Vec<DashboardMetricPoint>> {
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    match metric {
+        SCurveMetric::Progress => {
+            let sql = format!(
+                "SELECT DATE(created_at) as date, AVG(CAST(progress AS REAL)) as value
+                 FROM task_progress
+                 WHERE {match_proj} AND deleted_at IS NULL
+                 GROUP BY DATE(created_at)
+                 ORDER BY DATE(created_at) ASC"
+            );
+            let rows = sqlx::query_as::<_, (String, f64)>(&sql)
+                .bind(project_id.to_string())
+                .bind(project_id.to_string())
+                .fetch_all(pool)
+                .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(date, value)| DashboardMetricPoint {
+                    date,
+                    value: round2(value),
+                })
+                .collect())
+        }
+        SCurveMetric::Hours | SCurveMetric::Cost => {
+            let column = if metric == SCurveMetric::Hours {
+                "hours"
+            } else {
+                "cost_amount"
+            };
+            let sql = format!(
+                "SELECT DATE(work_date) as date, SUM(CAST({column} AS REAL)) as value
+                 FROM work_logs
+                 WHERE {match_proj} AND deleted_at IS NULL
+                 GROUP BY DATE(work_date)
+                 ORDER BY DATE(work_date) ASC"
+            );
+            let rows = sqlx::query_as::<_, (String, f64)>(&sql)
+                .bind(project_id.to_string())
+                .bind(project_id.to_string())
+                .fetch_all(pool)
+                .await?;
+
+            let mut cumulative = 0.0_f64;
+            Ok(rows
+                .into_iter()
+                .map(|(date, value)| {
+                    cumulative += value;
+                    DashboardMetricPoint {
+                        date,
+                        value: round2(cumulative),
+                    }
+                })
+                .collect())
+        }
+    }
+}
+
+fn metric_series_metadata(metric: SCurveMetric) -> (&'static str, &'static str, &'static str) {
+    match metric {
+        SCurveMetric::Progress => (
+            "project_plan.planned_progress",
+            "task_progress.progress (avg)",
+            "percent",
+        ),
+        SCurveMetric::Hours => (
+            "project_plan.planned_hours (cumulative)",
+            "work_logs.hours (sum, cumulative by day)",
+            "hours",
+        ),
+        SCurveMetric::Cost => (
+            "project_plan.planned_cost (cumulative)",
+            "work_logs.cost_amount (sum, cumulative by day)",
+            "currency",
+        ),
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -644,15 +856,29 @@ pub async fn update_project_plan(
                 "planned_progress must be between 0 and 100",
             ));
         }
+        if let Some(planned_hours) = point.planned_hours {
+            if planned_hours < 0.0 {
+                return Err(AppError::bad_request("planned_hours must be non-negative"));
+            }
+        }
+        if let Some(planned_cost) = point.planned_cost {
+            if planned_cost < 0.0 {
+                return Err(AppError::bad_request("planned_cost must be non-negative"));
+            }
+        }
+        let currency = normalize_currency(point.currency)?;
 
         let pid = Uuid::new_v4();
         sqlx::query(
-            "INSERT INTO project_plan (id, project_id, date, planned_progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO project_plan (id, project_id, date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(pid.to_string())
         .bind(id.to_string())
         .bind(point.date)
         .bind(point.planned_progress)
+        .bind(point.planned_hours)
+        .bind(point.planned_cost)
+        .bind(currency)
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -668,7 +894,7 @@ pub async fn update_project_plan(
     let plan_proj_case = uuid_sql::case_uuid("project_id");
     let plan_proj_match = uuid_sql::match_uuid_clause("project_id");
     let plan_sql = format!(
-        "SELECT {} , {} , date, planned_progress, created_at, updated_at FROM project_plan WHERE {} ORDER BY date ASC",
+        "SELECT {} , {} , date, planned_progress, planned_hours, planned_cost, currency, created_at, updated_at FROM project_plan WHERE {} ORDER BY date ASC",
         plan_id_case, plan_proj_case, plan_proj_match
     );
 
@@ -733,24 +959,26 @@ pub async fn list_project_members(
 ) -> AppResult<Json<Vec<ProjectMember>>> {
     let _ = fetch_project(&state.pool, auth.user_id, project_id).await?;
 
+    let membership_case = uuid_sql::case_uuid("pm.id");
     let user_case = uuid_sql::case_uuid("pm.user_id");
-    let role_case = uuid_sql::case_uuid("pm.role_id");
+    let role_case = uuid_sql::case_uuid("pm.access_role_id");
     let match_proj = uuid_sql::match_uuid_clause("pm.project_id");
     let sql = format!(
         "SELECT
             {} ,
+            {} ,
             u.name AS user_name,
             u.email AS user_email,
             {} ,
-            r.name AS role_name,
+            r.name AS access_role_name,
             pm.created_at,
             pm.updated_at
          FROM project_members pm
          INNER JOIN users u ON u.id = pm.user_id
-         INNER JOIN roles r ON r.id = pm.role_id
+         INNER JOIN roles r ON r.id = pm.access_role_id
          WHERE {} AND pm.deleted_at IS NULL AND u.deleted_at IS NULL
          ORDER BY u.name ASC",
-        user_case, role_case, match_proj
+        membership_case, user_case, role_case, match_proj
     );
 
     let rows = sqlx::query(&sql)
@@ -761,19 +989,25 @@ pub async fn list_project_members(
 
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
+        let membership_id: String = row.try_get("id")?;
         let user_id: String = row.try_get("user_id")?;
-        let role_id: String = row.try_get("role_id")?;
+        let access_role_id: String = row.try_get("access_role_id")?;
         let created_at: String = row.try_get("created_at")?;
         let updated_at: String = row.try_get("updated_at")?;
+
+        let membership_id = Uuid::parse_str(&membership_id)
+            .map_err(|e| AppError::internal(format!("invalid membership uuid: {}", e)))?;
+        let resource_roles = fetch_member_resource_roles(&state.pool, membership_id).await?;
 
         items.push(ProjectMember {
             user_id: Uuid::parse_str(&user_id)
                 .map_err(|e| AppError::internal(format!("invalid user_id uuid: {}", e)))?,
             user_name: row.try_get("user_name")?,
             user_email: row.try_get("user_email")?,
-            role_id: Uuid::parse_str(&role_id)
-                .map_err(|e| AppError::internal(format!("invalid role_id uuid: {}", e)))?,
-            role_name: row.try_get("role_name")?,
+            access_role_id: Uuid::parse_str(&access_role_id)
+                .map_err(|e| AppError::internal(format!("invalid access role uuid: {}", e)))?,
+            access_role_name: row.try_get("access_role_name")?,
+            resource_roles,
             created_at: parse_db_datetime(&created_at)?,
             updated_at: parse_db_datetime(&updated_at)?,
         });
@@ -799,7 +1033,13 @@ pub async fn create_project_member(
 ) -> AppResult<(StatusCode, Json<ProjectMember>)> {
     let _ = fetch_project(&state.pool, auth.user_id, project_id).await?;
     ensure_user_exists(&state.pool, payload.user_id).await?;
-    ensure_role_exists(&state.pool, payload.role_id).await?;
+    ensure_role_exists(&state.pool, payload.access_role_id).await?;
+    if payload.resource_role_ids.is_empty() {
+        return Err(AppError::bad_request(
+            "resource_role_ids must contain at least one role",
+        ));
+    }
+    ensure_resource_roles_exist(&state.pool, &payload.resource_role_ids).await?;
 
     let now = utc_now();
     let match_project = uuid_sql::match_uuid_clause("project_id");
@@ -820,21 +1060,24 @@ pub async fn create_project_member(
         .fetch_optional(&state.pool)
         .await?;
 
-    if let Some(row) = existing {
+    let membership_id = if let Some(row) = existing {
         let id: String = row.try_get("id")?;
         let deleted_at: Option<String> = row.try_get("deleted_at")?;
+        let membership_id = Uuid::parse_str(&id)
+            .map_err(|e| AppError::internal(format!("invalid membership id: {}", e)))?;
+
         if deleted_at.is_some() {
             let match_id = uuid_sql::match_uuid_clause("id");
             let actor_match = uuid_sql::match_uuid_clause("id");
             let sql = format!(
                 "UPDATE project_members
-                 SET role_id = ?, deleted_at = NULL, deleted_by = NULL, updated_at = ?,
+                 SET access_role_id = ?, deleted_at = NULL, deleted_by = NULL, updated_at = ?,
                      updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
                  WHERE {}",
                 actor_match, match_id
             );
             sqlx::query(&sql)
-                .bind(payload.role_id.to_string())
+                .bind(payload.access_role_id.to_string())
                 .bind(now)
                 .bind(auth.user_id.to_string())
                 .bind(auth.user_id.to_string())
@@ -847,13 +1090,13 @@ pub async fn create_project_member(
             let actor_match = uuid_sql::match_uuid_clause("id");
             let sql = format!(
                 "UPDATE project_members
-                 SET role_id = ?, updated_at = ?,
+                 SET access_role_id = ?, updated_at = ?,
                      updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
                  WHERE {}",
                 actor_match, match_id
             );
             sqlx::query(&sql)
-                .bind(payload.role_id.to_string())
+                .bind(payload.access_role_id.to_string())
                 .bind(now)
                 .bind(auth.user_id.to_string())
                 .bind(auth.user_id.to_string())
@@ -862,13 +1105,16 @@ pub async fn create_project_member(
                 .execute(&state.pool)
                 .await?;
         }
+
+        membership_id
     } else {
+        let membership_id = Uuid::new_v4();
         let project_match = uuid_sql::match_uuid_clause("id");
         let user_match = uuid_sql::match_uuid_clause("id");
         let actor_match = uuid_sql::match_uuid_clause("id");
         let insert_sql = format!(
             "INSERT INTO project_members (
-                id, project_id, user_id, role_id, created_at, created_by, updated_at, updated_by
+                id, project_id, user_id, access_role_id, created_at, created_by, updated_at, updated_by
              ) VALUES (
                 ?,
                 (SELECT id FROM projects WHERE {} AND deleted_at IS NULL),
@@ -883,12 +1129,12 @@ pub async fn create_project_member(
         );
 
         sqlx::query(&insert_sql)
-            .bind(Uuid::new_v4().to_string())
+            .bind(membership_id.to_string())
             .bind(project_id.to_string())
             .bind(project_id.to_string())
             .bind(payload.user_id.to_string())
             .bind(payload.user_id.to_string())
-            .bind(payload.role_id.to_string())
+            .bind(payload.access_role_id.to_string())
             .bind(now)
             .bind(auth.user_id.to_string())
             .bind(auth.user_id.to_string())
@@ -897,7 +1143,17 @@ pub async fn create_project_member(
             .bind(auth.user_id.to_string())
             .execute(&state.pool)
             .await?;
-    }
+
+        membership_id
+    };
+
+    replace_member_resource_roles(
+        &state.pool,
+        membership_id,
+        &payload.resource_role_ids,
+        auth.user_id,
+    )
+    .await?;
 
     let member = fetch_project_member(&state.pool, project_id, payload.user_id).await?;
     Ok((StatusCode::CREATED, Json(member)))
@@ -952,6 +1208,48 @@ pub async fn delete_project_member(
         return Err(AppError::not_found("project member not found"));
     }
 
+    let membership_case = uuid_sql::case_uuid("id");
+    let lookup_sql = format!(
+        "SELECT {}
+         FROM project_members
+         WHERE {} AND {}
+         ORDER BY updated_at DESC
+         LIMIT 1",
+        membership_case, match_project, match_user
+    );
+
+    if let Some(membership_id) = sqlx::query_scalar::<_, String>(&lookup_sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(&state.pool)
+        .await?
+    {
+        let match_membership = uuid_sql::match_uuid_clause("membership_id");
+        let actor_match = uuid_sql::match_uuid_clause("id");
+        let sql = format!(
+            "UPDATE project_member_resource_roles
+             SET deleted_at = ?,
+                 deleted_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                 updated_at = ?,
+                 updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+             WHERE {} AND deleted_at IS NULL",
+            actor_match, actor_match, match_membership
+        );
+        sqlx::query(&sql)
+            .bind(now)
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(now)
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(membership_id.clone())
+            .bind(membership_id)
+            .execute(&state.pool)
+            .await?;
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -967,23 +1265,25 @@ pub async fn list_my_project_scopes(
     auth: AuthUser,
 ) -> AppResult<Json<Vec<MyProjectScopeSummary>>> {
     let user_match = uuid_sql::match_uuid_clause("pm.user_id");
+    let membership_case = uuid_sql::case_uuid("pm.id");
     let project_case = uuid_sql::case_uuid("pm.project_id");
-    let role_case = uuid_sql::case_uuid("pm.role_id");
+    let role_case = uuid_sql::case_uuid("pm.access_role_id");
     let sql = format!(
         "SELECT
             {} ,
+            {} ,
             p.name AS project_name,
             {} ,
-            r.name AS role_name,
+            r.name AS access_role_name,
             perm.name AS permission_name
          FROM project_members pm
          INNER JOIN projects p ON p.id = pm.project_id
-         INNER JOIN roles r ON r.id = pm.role_id
-         LEFT JOIN role_permissions rp ON rp.role_id = pm.role_id
+         INNER JOIN roles r ON r.id = pm.access_role_id
+         LEFT JOIN role_permissions rp ON rp.role_id = pm.access_role_id
          LEFT JOIN permissions perm ON perm.id = rp.permission_id
          WHERE {} AND pm.deleted_at IS NULL AND p.deleted_at IS NULL
          ORDER BY p.name ASC, perm.name ASC",
-        project_case, role_case, user_match
+        membership_case, project_case, role_case, user_match
     );
 
     let rows = sqlx::query(&sql)
@@ -992,36 +1292,48 @@ pub async fn list_my_project_scopes(
         .fetch_all(&state.pool)
         .await?;
 
-    let mut grouped: std::collections::BTreeMap<String, MyProjectScopeSummary> =
+    let mut grouped: std::collections::BTreeMap<String, (Uuid, MyProjectScopeSummary)> =
         std::collections::BTreeMap::new();
+
     for row in rows {
+        let membership_id_s: String = row.try_get("id")?;
         let project_id_s: String = row.try_get("project_id")?;
-        let role_id_s: String = row.try_get("role_id")?;
+        let access_role_id_s: String = row.try_get("access_role_id")?;
+        let membership_id = Uuid::parse_str(&membership_id_s)
+            .map_err(|e| AppError::internal(format!("invalid membership id: {}", e)))?;
         let project_id = Uuid::parse_str(&project_id_s)
             .map_err(|e| AppError::internal(format!("invalid project id: {}", e)))?;
-        let role_id = Uuid::parse_str(&role_id_s)
-            .map_err(|e| AppError::internal(format!("invalid role id: {}", e)))?;
+        let access_role_id = Uuid::parse_str(&access_role_id_s)
+            .map_err(|e| AppError::internal(format!("invalid access role id: {}", e)))?;
         let permission_name: Option<String> = row.try_get("permission_name")?;
-        let entry = grouped
-            .entry(project_id_s.clone())
-            .or_insert_with(|| MyProjectScopeSummary {
-                project_id,
-                project_name: row.try_get("project_name").unwrap_or_default(),
-                role_id,
-                role_name: row.try_get("role_name").unwrap_or_default(),
-                permissions: Vec::new(),
-            });
+
+        let entry = grouped.entry(project_id_s.clone()).or_insert_with(|| {
+            (
+                membership_id,
+                MyProjectScopeSummary {
+                    project_id,
+                    project_name: row.try_get("project_name").unwrap_or_default(),
+                    access_role_id,
+                    access_role_name: row.try_get("access_role_name").unwrap_or_default(),
+                    resource_roles: Vec::new(),
+                    permissions: Vec::new(),
+                },
+            )
+        });
         if let Some(permission_name) = permission_name {
-            if !entry.permissions.contains(&permission_name) {
-                entry.permissions.push(permission_name);
+            if !entry.1.permissions.contains(&permission_name) {
+                entry.1.permissions.push(permission_name);
             }
         }
     }
 
-    let mut items: Vec<MyProjectScopeSummary> = grouped.into_values().collect();
-    for item in &mut items {
-        item.permissions.sort();
+    let mut items = Vec::with_capacity(grouped.len());
+    for (_, (membership_id, mut scope)) in grouped {
+        scope.resource_roles = fetch_member_resource_roles(&state.pool, membership_id).await?;
+        scope.permissions.sort();
+        items.push(scope);
     }
+    items.sort_by(|a, b| a.project_name.cmp(&b.project_name));
     Ok(Json(items))
 }
 
@@ -1098,13 +1410,19 @@ pub async fn get_portfolio_s_curve_summary(
         projects.push(PortfolioSCurveProjectSummary {
             project_id,
             project_name,
+            metric_supported: health.metric_supported,
+            data_status: health.data_status,
             elapsed_time_pct: health.elapsed_time_pct,
             planned_pct: health.planned_pct,
             actual_pct: health.actual_pct,
             variance_pct: health.variance_pct,
-            stage: health.stage.clone(),
+            stage: health.stage,
             rule_50_70_pass: health.rule_50_70_pass,
             rule_50_70_status: health.rule_50_70_status,
+            planned_source: health.planned_source.clone(),
+            actual_source: health.actual_source.clone(),
+            unit: health.unit.clone(),
+            currency: health.currency.clone(),
             last_updated_at: health.last_updated_at,
         });
     }
@@ -1118,17 +1436,36 @@ pub async fn get_portfolio_s_curve_summary(
     let mut maturity_count = 0usize;
     let mut decline_count = 0usize;
     for project in &projects {
-        match project.stage.as_deref() {
-            Some("lag") => lag_count += 1,
-            Some("log") => log_count += 1,
-            Some("maturity") => maturity_count += 1,
-            Some("decline") => decline_count += 1,
+        match project.stage {
+            Some(SCurveStage::Lag) => lag_count += 1,
+            Some(SCurveStage::Log) => log_count += 1,
+            Some(SCurveStage::Maturity) => maturity_count += 1,
+            Some(SCurveStage::Decline) => decline_count += 1,
             _ => {}
         }
     }
 
+    let summary_data_status = if projects
+        .iter()
+        .any(|project| project.data_status == SCurveDataStatus::Ok)
+    {
+        SCurveDataStatus::Ok
+    } else {
+        SCurveDataStatus::InsufficientData
+    };
+
     Ok(Json(PortfolioSCurveSummaryResponse {
         metric,
+        metric_supported: true,
+        data_status: summary_data_status,
+        planned_source: projects
+            .iter()
+            .find_map(|project| project.planned_source.clone()),
+        actual_source: projects
+            .iter()
+            .find_map(|project| project.actual_source.clone()),
+        unit: projects.iter().find_map(|project| project.unit.clone()),
+        currency: projects.iter().find_map(|project| project.currency.clone()),
         project_count: projects.len(),
         avg_planned_pct,
         avg_actual_pct,
@@ -1146,25 +1483,27 @@ async fn fetch_project_member(
     project_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<ProjectMember> {
+    let membership_case = uuid_sql::case_uuid("pm.id");
     let user_case = uuid_sql::case_uuid("pm.user_id");
-    let role_case = uuid_sql::case_uuid("pm.role_id");
+    let role_case = uuid_sql::case_uuid("pm.access_role_id");
     let match_project = uuid_sql::match_uuid_clause("pm.project_id");
     let match_user = uuid_sql::match_uuid_clause("pm.user_id");
     let sql = format!(
         "SELECT
             {} ,
+            {} ,
             u.name AS user_name,
             u.email AS user_email,
             {} ,
-            r.name AS role_name,
+            r.name AS access_role_name,
             pm.created_at,
             pm.updated_at
          FROM project_members pm
          INNER JOIN users u ON u.id = pm.user_id
-         INNER JOIN roles r ON r.id = pm.role_id
+         INNER JOIN roles r ON r.id = pm.access_role_id
          WHERE {} AND {} AND pm.deleted_at IS NULL
          LIMIT 1",
-        user_case, role_case, match_project, match_user
+        membership_case, user_case, role_case, match_project, match_user
     );
     let row = sqlx::query(&sql)
         .bind(project_id.to_string())
@@ -1175,22 +1514,59 @@ async fn fetch_project_member(
         .await?
         .ok_or_else(|| AppError::not_found("project member not found"))?;
 
+    let membership_id: String = row.try_get("id")?;
     let user_id: String = row.try_get("user_id")?;
-    let role_id: String = row.try_get("role_id")?;
+    let access_role_id: String = row.try_get("access_role_id")?;
     let created_at: String = row.try_get("created_at")?;
     let updated_at: String = row.try_get("updated_at")?;
+    let membership_id = Uuid::parse_str(&membership_id)
+        .map_err(|e| AppError::internal(format!("invalid membership uuid: {}", e)))?;
+    let resource_roles = fetch_member_resource_roles(pool, membership_id).await?;
 
     Ok(ProjectMember {
         user_id: Uuid::parse_str(&user_id)
             .map_err(|e| AppError::internal(format!("invalid user_id uuid: {}", e)))?,
         user_name: row.try_get("user_name")?,
         user_email: row.try_get("user_email")?,
-        role_id: Uuid::parse_str(&role_id)
-            .map_err(|e| AppError::internal(format!("invalid role_id uuid: {}", e)))?,
-        role_name: row.try_get("role_name")?,
+        access_role_id: Uuid::parse_str(&access_role_id)
+            .map_err(|e| AppError::internal(format!("invalid access role uuid: {}", e)))?,
+        access_role_name: row.try_get("access_role_name")?,
+        resource_roles,
         created_at: parse_db_datetime(&created_at)?,
         updated_at: parse_db_datetime(&updated_at)?,
     })
+}
+
+async fn fetch_member_resource_roles(
+    pool: &SqlitePool,
+    membership_id: Uuid,
+) -> AppResult<Vec<crate::models::resource_role::ResourceRoleRef>> {
+    let role_case = uuid_sql::case_uuid("rr.id");
+    let match_membership = uuid_sql::match_uuid_clause("pmrr.membership_id");
+    let sql = format!(
+        "SELECT {} , rr.name
+         FROM project_member_resource_roles pmrr
+         INNER JOIN resource_roles rr ON rr.id = pmrr.resource_role_id
+         WHERE {} AND pmrr.deleted_at IS NULL AND rr.deleted_at IS NULL
+         ORDER BY rr.name ASC",
+        role_case, match_membership
+    );
+    let rows = sqlx::query(&sql)
+        .bind(membership_id.to_string())
+        .bind(membership_id.to_string())
+        .fetch_all(pool)
+        .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.try_get("id")?;
+        out.push(crate::models::resource_role::ResourceRoleRef {
+            id: Uuid::parse_str(&id)
+                .map_err(|e| AppError::internal(format!("invalid resource role uuid: {}", e)))?,
+            name: row.try_get("name")?,
+        });
+    }
+    Ok(out)
 }
 
 async fn ensure_user_exists(pool: &SqlitePool, user_id: Uuid) -> AppResult<()> {
@@ -1206,6 +1582,130 @@ async fn ensure_user_exists(pool: &SqlitePool, user_id: Uuid) -> AppResult<()> {
         .await?;
     if exists.is_none() {
         return Err(AppError::not_found("user not found"));
+    }
+    Ok(())
+}
+
+async fn ensure_resource_roles_exist(pool: &SqlitePool, role_ids: &[Uuid]) -> AppResult<()> {
+    for role_id in role_ids {
+        let match_role = uuid_sql::match_uuid_clause("id");
+        let sql = format!(
+            "SELECT 1 FROM resource_roles WHERE {} AND deleted_at IS NULL",
+            match_role
+        );
+        let exists: Option<i64> = sqlx::query_scalar(&sql)
+            .bind(role_id.to_string())
+            .bind(role_id.to_string())
+            .fetch_optional(pool)
+            .await?;
+        if exists.is_none() {
+            return Err(AppError::not_found(format!(
+                "resource role {} not found",
+                role_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn replace_member_resource_roles(
+    pool: &SqlitePool,
+    membership_id: Uuid,
+    role_ids: &[Uuid],
+    actor_id: Uuid,
+) -> AppResult<()> {
+    let now = utc_now();
+    let membership_match = uuid_sql::match_uuid_clause("membership_id");
+    let actor_match = uuid_sql::match_uuid_clause("id");
+    let deactivate_sql = format!(
+        "UPDATE project_member_resource_roles
+         SET deleted_at = ?,
+             deleted_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+             updated_at = ?,
+             updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+         WHERE {} AND deleted_at IS NULL",
+        actor_match, actor_match, membership_match
+    );
+    sqlx::query(&deactivate_sql)
+        .bind(now)
+        .bind(actor_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(now)
+        .bind(actor_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(membership_id.to_string())
+        .bind(membership_id.to_string())
+        .execute(pool)
+        .await?;
+
+    for role_id in role_ids {
+        let match_membership = uuid_sql::match_uuid_clause("membership_id");
+        let match_role = uuid_sql::match_uuid_clause("resource_role_id");
+        let existing_sql = format!(
+            "SELECT id
+             FROM project_member_resource_roles
+             WHERE {} AND {}
+             ORDER BY created_at DESC
+             LIMIT 1",
+            match_membership, match_role
+        );
+        let existing: Option<String> = sqlx::query_scalar(&existing_sql)
+            .bind(membership_id.to_string())
+            .bind(membership_id.to_string())
+            .bind(role_id.to_string())
+            .bind(role_id.to_string())
+            .fetch_optional(pool)
+            .await?;
+
+        if let Some(id) = existing {
+            let match_id = uuid_sql::match_uuid_clause("id");
+            let actor_match = uuid_sql::match_uuid_clause("id");
+            let sql = format!(
+                "UPDATE project_member_resource_roles
+                 SET deleted_at = NULL,
+                     deleted_by = NULL,
+                     updated_at = ?,
+                     updated_by = (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+                 WHERE {}",
+                actor_match, match_id
+            );
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(actor_id.to_string())
+                .bind(actor_id.to_string())
+                .bind(id.clone())
+                .bind(id)
+                .execute(pool)
+                .await?;
+        } else {
+            let actor_match = uuid_sql::match_uuid_clause("id");
+            let insert_sql = format!(
+                "INSERT INTO project_member_resource_roles (
+                    id, membership_id, resource_role_id, created_at, created_by, updated_at, updated_by
+                 ) VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                    ?,
+                    (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+                 )",
+                actor_match, actor_match
+            );
+            sqlx::query(&insert_sql)
+                .bind(Uuid::new_v4().to_string())
+                .bind(membership_id.to_string())
+                .bind(role_id.to_string())
+                .bind(now)
+                .bind(actor_id.to_string())
+                .bind(actor_id.to_string())
+                .bind(now)
+                .bind(actor_id.to_string())
+                .bind(actor_id.to_string())
+                .execute(pool)
+                .await?;
+        }
     }
     Ok(())
 }
@@ -1231,29 +1731,15 @@ async fn compute_project_s_curve_health(
 ) -> AppResult<SCurveHealthResponse> {
     let elapsed_time_pct = compute_elapsed_time_pct(pool, project_id).await?;
     let last_updated_at = compute_last_updated_at(pool, project_id).await?;
-
-    if metric != SCurveMetric::Progress {
-        return Ok(SCurveHealthResponse {
-            metric,
-            elapsed_time_pct,
-            planned_pct: None,
-            actual_pct: None,
-            variance_pct: None,
-            stage: None,
-            rule_50_70_pass: None,
-            rule_50_70_status: "unsupported_metric".to_string(),
-            last_updated_at,
-        });
-    }
-
-    let planned_pct = compute_planned_pct(pool, project_id).await?;
-    let actual_pct = compute_actual_pct(pool, project_id).await?;
+    let metric_values = compute_metric_values(pool, project_id, metric).await?;
+    let planned_pct = metric_values.planned_pct;
+    let actual_pct = metric_values.actual_pct;
     let variance_pct = match (actual_pct, planned_pct) {
         (Some(actual), Some(planned)) => Some(round2(actual - planned)),
         _ => None,
     };
     let (rule_50_70_pass, rule_50_70_status) =
-        compute_rule_50_70_status(elapsed_time_pct, planned_pct, actual_pct);
+        compute_rule_50_70_status(metric, elapsed_time_pct, planned_pct, actual_pct);
     let stage = resolve_stage(
         pool,
         project_id,
@@ -1266,8 +1752,16 @@ async fn compute_project_s_curve_health(
     )
     .await?;
 
+    let data_status = if planned_pct.is_some() && actual_pct.is_some() {
+        SCurveDataStatus::Ok
+    } else {
+        SCurveDataStatus::InsufficientData
+    };
+
     Ok(SCurveHealthResponse {
         metric,
+        metric_supported: true,
+        data_status,
         elapsed_time_pct: elapsed_time_pct.map(round2),
         planned_pct: planned_pct.map(round2),
         actual_pct: actual_pct.map(round2),
@@ -1275,6 +1769,10 @@ async fn compute_project_s_curve_health(
         stage,
         rule_50_70_pass,
         rule_50_70_status,
+        planned_source: Some(metric_values.planned_source),
+        actual_source: Some(metric_values.actual_source),
+        unit: Some(metric_values.unit),
+        currency: metric_values.currency,
         last_updated_at,
     })
 }
@@ -1307,7 +1805,10 @@ async fn compute_elapsed_time_pct(pool: &SqlitePool, project_id: Uuid) -> AppRes
     Ok(value)
 }
 
-async fn compute_planned_pct(pool: &SqlitePool, project_id: Uuid) -> AppResult<Option<f64>> {
+async fn compute_planned_progress_pct(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Option<f64>> {
     let match_proj = uuid_sql::match_uuid_clause("project_id");
     let sql = format!(
         "SELECT CAST(planned_progress AS REAL)
@@ -1329,7 +1830,10 @@ async fn compute_planned_pct(pool: &SqlitePool, project_id: Uuid) -> AppResult<O
     Ok(value)
 }
 
-async fn compute_actual_pct(pool: &SqlitePool, project_id: Uuid) -> AppResult<Option<f64>> {
+async fn compute_actual_progress_pct(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<(Option<f64>, &'static str)> {
     let match_proj_tasks = uuid_sql::match_uuid_clause("project_id");
     let sql_tasks = format!(
         "SELECT AVG(CAST(progress AS REAL)) FROM tasks WHERE {} AND deleted_at IS NULL",
@@ -1342,7 +1846,7 @@ async fn compute_actual_pct(pool: &SqlitePool, project_id: Uuid) -> AppResult<Op
         .await?;
 
     if tasks_avg.is_some() {
-        return Ok(tasks_avg);
+        return Ok((tasks_avg, "tasks.progress (avg)"));
     }
 
     let match_proj_progress = uuid_sql::match_uuid_clause("project_id");
@@ -1355,13 +1859,158 @@ async fn compute_actual_pct(pool: &SqlitePool, project_id: Uuid) -> AppResult<Op
         .bind(project_id.to_string())
         .fetch_one(pool)
         .await?;
-    Ok(progress_avg)
+    Ok((progress_avg, "task_progress.progress (avg)"))
+}
+
+struct MetricValues {
+    planned_pct: Option<f64>,
+    actual_pct: Option<f64>,
+    planned_source: String,
+    actual_source: String,
+    unit: String,
+    currency: Option<String>,
+}
+
+async fn compute_metric_values(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    metric: SCurveMetric,
+) -> AppResult<MetricValues> {
+    match metric {
+        SCurveMetric::Progress => {
+            let planned_pct = compute_planned_progress_pct(pool, project_id).await?;
+            let (actual_pct, actual_source) = compute_actual_progress_pct(pool, project_id).await?;
+            Ok(MetricValues {
+                planned_pct,
+                actual_pct,
+                planned_source: "project_plan.planned_progress".to_string(),
+                actual_source: actual_source.to_string(),
+                unit: "percent".to_string(),
+                currency: None,
+            })
+        }
+        SCurveMetric::Hours => {
+            let (planned_pct, actual_pct) =
+                compute_relative_metric_pct(pool, project_id, "planned_hours", "hours").await?;
+            Ok(MetricValues {
+                planned_pct,
+                actual_pct,
+                planned_source: "project_plan.planned_hours (cumulative)".to_string(),
+                actual_source: "work_logs.hours (sum)".to_string(),
+                unit: "hours".to_string(),
+                currency: None,
+            })
+        }
+        SCurveMetric::Cost => {
+            let (planned_pct, actual_pct) =
+                compute_relative_metric_pct(pool, project_id, "planned_cost", "cost_amount")
+                    .await?;
+            Ok(MetricValues {
+                planned_pct,
+                actual_pct,
+                planned_source: "project_plan.planned_cost (cumulative)".to_string(),
+                actual_source: "work_logs.cost_amount (sum)".to_string(),
+                unit: "currency".to_string(),
+                currency: Some(resolve_cost_currency(pool, project_id).await?),
+            })
+        }
+    }
+}
+
+async fn compute_relative_metric_pct(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    planned_column: &str,
+    actual_column: &str,
+) -> AppResult<(Option<f64>, Option<f64>)> {
+    let planned_current =
+        compute_planned_metric_value_at_now(pool, project_id, planned_column).await?;
+    let planned_total = compute_planned_metric_total(pool, project_id, planned_column).await?;
+    let actual_total = compute_actual_metric_total(pool, project_id, actual_column).await?;
+    let planned_pct = percentage_of(planned_current, planned_total);
+    let actual_pct = percentage_of(actual_total, planned_total);
+    Ok((planned_pct, actual_pct))
+}
+
+async fn compute_planned_metric_value_at_now(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    column: &str,
+) -> AppResult<Option<f64>> {
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "SELECT CAST({column} AS REAL)
+         FROM project_plan
+         WHERE {match_proj} AND {column} IS NOT NULL
+         ORDER BY
+            CASE WHEN datetime(date) <= datetime('now') THEN 0 ELSE 1 END,
+            ABS(julianday(date) - julianday('now')) ASC
+         LIMIT 1"
+    );
+
+    let value: Option<f64> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+    Ok(value)
+}
+
+async fn compute_planned_metric_total(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    column: &str,
+) -> AppResult<Option<f64>> {
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "SELECT MAX(CAST({column} AS REAL))
+         FROM project_plan
+         WHERE {match_proj} AND {column} IS NOT NULL"
+    );
+
+    let value: Option<f64> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_one(pool)
+        .await?;
+    Ok(value)
+}
+
+async fn compute_actual_metric_total(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    column: &str,
+) -> AppResult<Option<f64>> {
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "SELECT SUM(CAST({column} AS REAL))
+         FROM work_logs
+         WHERE {match_proj} AND deleted_at IS NULL"
+    );
+    let value: Option<f64> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_one(pool)
+        .await?;
+    Ok(value)
+}
+
+fn percentage_of(value: Option<f64>, total: Option<f64>) -> Option<f64> {
+    let (Some(value), Some(total)) = (value, total) else {
+        return None;
+    };
+    if total <= 0.0 {
+        return None;
+    }
+    Some((value / total) * 100.0)
 }
 
 async fn compute_last_updated_at(pool: &SqlitePool, project_id: Uuid) -> AppResult<DateTime<Utc>> {
     let project_match = uuid_sql::match_uuid_clause("id");
     let task_match = uuid_sql::match_uuid_clause("project_id");
     let progress_match = uuid_sql::match_uuid_clause("project_id");
+    let work_log_match = uuid_sql::match_uuid_clause("project_id");
     let plan_match = uuid_sql::match_uuid_clause("project_id");
     let sql = format!(
         "SELECT MAX(ts) FROM (
@@ -1371,11 +2020,15 @@ async fn compute_last_updated_at(pool: &SqlitePool, project_id: Uuid) -> AppResu
             UNION ALL
             SELECT updated_at AS ts FROM task_progress WHERE {} AND deleted_at IS NULL
             UNION ALL
+            SELECT updated_at AS ts FROM work_logs WHERE {} AND deleted_at IS NULL
+            UNION ALL
             SELECT updated_at AS ts FROM project_plan WHERE {}
         )",
-        project_match, task_match, progress_match, plan_match
+        project_match, task_match, progress_match, work_log_match, plan_match
     );
     let value: Option<String> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
@@ -1402,11 +2055,7 @@ async fn resolve_stage(
     actual_pct: Option<f64>,
     variance_pct: Option<f64>,
     rule_50_70_pass: Option<bool>,
-) -> AppResult<Option<String>> {
-    if metric != SCurveMetric::Progress {
-        return Ok(None);
-    }
-
+) -> AppResult<Option<SCurveStage>> {
     let metric_name = metric_to_str(metric);
     let project_match = uuid_sql::match_uuid_clause("rs.project_id");
     let sql_rule_set = format!(
@@ -1435,7 +2084,7 @@ async fn resolve_stage(
         .flatten();
 
     let Some(rule_set_id) = rule_set_id else {
-        return Ok(None);
+        return Ok(default_stage_from_variance(variance_pct));
     };
 
     let rows = sqlx::query(
@@ -1459,7 +2108,8 @@ async fn resolve_stage(
     .await?;
 
     for row in rows {
-        let stage: String = row.try_get("stage")?;
+        let stage_raw: String = row.try_get("stage")?;
+        let stage = parse_stage(&stage_raw)?;
         let elapsed_from: Option<f64> = row.try_get("elapsed_from")?;
         let elapsed_to: Option<f64> = row.try_get("elapsed_to")?;
         let planned_from: Option<f64> = row.try_get("planned_from")?;
@@ -1492,7 +2142,7 @@ async fn resolve_stage(
         return Ok(Some(stage));
     }
 
-    Ok(None)
+    Ok(default_stage_from_variance(variance_pct))
 }
 
 fn value_in_range(value: Option<f64>, min: Option<f64>, max: Option<f64>) -> bool {
@@ -1515,32 +2165,72 @@ fn value_in_range(value: Option<f64>, min: Option<f64>, max: Option<f64>) -> boo
     true
 }
 
+fn parse_stage(raw: &str) -> AppResult<SCurveStage> {
+    match raw {
+        "lag" => Ok(SCurveStage::Lag),
+        "log" => Ok(SCurveStage::Log),
+        "maturity" => Ok(SCurveStage::Maturity),
+        "decline" => Ok(SCurveStage::Decline),
+        other => Err(AppError::internal(format!(
+            "invalid stage value in rules: {}",
+            other
+        ))),
+    }
+}
+
+fn default_stage_from_variance(variance_pct: Option<f64>) -> Option<SCurveStage> {
+    let variance = variance_pct?;
+    if variance < -10.0 {
+        Some(SCurveStage::Lag)
+    } else if variance <= 0.0 {
+        Some(SCurveStage::Log)
+    } else if variance <= 10.0 {
+        Some(SCurveStage::Maturity)
+    } else {
+        Some(SCurveStage::Decline)
+    }
+}
+
 fn compute_rule_50_70_status(
+    metric: SCurveMetric,
     elapsed_time_pct: Option<f64>,
     planned_pct: Option<f64>,
     actual_pct: Option<f64>,
-) -> (Option<bool>, String) {
+) -> (Option<bool>, Rule5070Status) {
     let Some(elapsed) = elapsed_time_pct else {
-        return (None, "insufficient_elapsed_time_data".to_string());
+        return (None, Rule5070Status::InsufficientElapsedTimeData);
     };
     let (Some(planned), Some(actual)) = (planned_pct, actual_pct) else {
-        return (None, "insufficient_progress_data".to_string());
+        return (
+            None,
+            if metric == SCurveMetric::Progress {
+                Rule5070Status::InsufficientProgressData
+            } else {
+                Rule5070Status::InsufficientMetricData
+            },
+        );
     };
     if elapsed < 50.0 {
-        return (None, "pre_window".to_string());
+        return (None, Rule5070Status::PreWindow);
     }
     let pass = actual >= planned;
     if elapsed <= 70.0 {
-        return (Some(pass), if pass { "pass" } else { "fail" }.to_string());
+        return (
+            Some(pass),
+            if pass {
+                Rule5070Status::Pass
+            } else {
+                Rule5070Status::Fail
+            },
+        );
     }
     (
         Some(pass),
         if pass {
-            "post_window_pass"
+            Rule5070Status::PostWindowPass
         } else {
-            "post_window_fail"
-        }
-        .to_string(),
+            Rule5070Status::PostWindowFail
+        },
     )
 }
 
@@ -1565,6 +2255,58 @@ fn metric_to_str(metric: SCurveMetric) -> &'static str {
         SCurveMetric::Progress => "progress",
         SCurveMetric::Hours => "hours",
         SCurveMetric::Cost => "cost",
+    }
+}
+
+fn default_cost_currency() -> String {
+    let raw = std::env::var("SCURVE_COST_CURRENCY").unwrap_or_else(|_| "USD".to_string());
+    let normalized = raw.trim().to_uppercase();
+    if normalized.len() == 3 && normalized.chars().all(|c| c.is_ascii_alphabetic()) {
+        normalized
+    } else {
+        "USD".to_string()
+    }
+}
+
+fn normalize_currency(currency: Option<String>) -> AppResult<Option<String>> {
+    let Some(raw) = currency else {
+        return Ok(None);
+    };
+    let normalized = raw.trim().to_uppercase();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    if normalized.len() != 3 || !normalized.chars().all(|c| c.is_ascii_alphabetic()) {
+        return Err(AppError::bad_request(
+            "currency must be a 3-letter ISO code (e.g. USD)",
+        ));
+    }
+    Ok(Some(normalized))
+}
+
+async fn resolve_cost_currency(pool: &SqlitePool, project_id: Uuid) -> AppResult<String> {
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "SELECT currency
+         FROM project_plan
+         WHERE {match_proj}
+           AND currency IS NOT NULL
+           AND TRIM(currency) <> ''
+         ORDER BY datetime(date) DESC, updated_at DESC
+         LIMIT 1"
+    );
+
+    let found: Option<String> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+
+    if let Some(curr) = normalize_currency(found)? {
+        Ok(curr)
+    } else {
+        Ok(default_cost_currency())
     }
 }
 

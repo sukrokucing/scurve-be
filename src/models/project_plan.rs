@@ -12,6 +12,9 @@ pub struct ProjectPlanPoint {
     pub project_id: Uuid,
     pub date: DateTime<Utc>,
     pub planned_progress: i32,
+    pub planned_hours: Option<f64>,
+    pub planned_cost: Option<f64>,
+    pub currency: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -31,6 +34,9 @@ pub struct DbProjectPlanPoint {
     pub project_id: Uuid,
     pub date: DateTime<Utc>,
     pub planned_progress: i32,
+    pub planned_hours: Option<f64>,
+    pub planned_cost: Option<f64>,
+    pub currency: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -44,6 +50,9 @@ impl TryFrom<DbProjectPlanPoint> for ProjectPlanPoint {
             project_id: value.project_id,
             date: value.date,
             planned_progress: value.planned_progress,
+            planned_hours: value.planned_hours,
+            planned_cost: value.planned_cost,
+            currency: value.currency,
             created_at: value.created_at,
             updated_at: value.updated_at,
         })
@@ -57,4 +66,10 @@ pub struct ProjectPlanCreateRequest {
     pub date: DateTime<Utc>,
     #[schema(example = 10)]
     pub planned_progress: i32,
+    #[schema(example = 120.5)]
+    pub planned_hours: Option<f64>,
+    #[schema(example = 15200.0)]
+    pub planned_cost: Option<f64>,
+    #[schema(example = "USD")]
+    pub currency: Option<String>,
 }

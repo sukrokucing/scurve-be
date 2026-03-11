@@ -141,17 +141,25 @@ impl Default for RoutePermissionCache {
 
 /// Convert a route pattern like `/projects/:id` to a regex like `^/projects/[^/]+$`
 fn pattern_to_regex(pattern: &str) -> Result<Regex, regex::Error> {
-    let escaped = regex::escape(pattern);
-    // Replace escaped :param patterns with a wildcard
-    let regex_str = escaped
-        .replace(r":project_id", r"[^/]+")
-        .replace(r":task_id", r"[^/]+")
-        .replace(r":role_id", r"[^/]+")
-        .replace(r":user_id", r"[^/]+")
-        .replace(r":permission_id", r"[^/]+")
-        .replace(r":id", r"[^/]+");
+    if pattern == "/" {
+        return Regex::new(r"^/$");
+    }
 
-    Regex::new(&format!("^{}$", regex_str))
+    let mut regex = String::from("^");
+    for segment in pattern.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        regex.push('/');
+        if segment.starts_with(':') {
+            regex.push_str("[^/]+");
+        } else {
+            regex.push_str(&regex::escape(segment));
+        }
+    }
+    regex.push('$');
+
+    Regex::new(&regex)
 }
 
 #[cfg(test)]
@@ -172,6 +180,14 @@ mod tests {
         let regex = pattern_to_regex("/projects/:project_id/tasks/:id").unwrap();
         assert!(regex.is_match("/projects/abc/tasks/def"));
         assert!(!regex.is_match("/projects/abc/tasks"));
+    }
+
+    #[test]
+    fn test_arbitrary_param_names() {
+        let regex = pattern_to_regex("/projects/:project_id/resource-roles/:resource_role_id/rate")
+            .unwrap();
+        assert!(regex.is_match("/projects/abc/resource-roles/def/rate"));
+        assert!(!regex.is_match("/projects/abc/resource-roles/def"));
     }
 
     #[tokio::test]

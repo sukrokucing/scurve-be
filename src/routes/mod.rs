@@ -3,6 +3,8 @@ pub mod health;
 pub mod progress;
 pub mod projects;
 pub mod rbac;
+pub mod resource_roles;
 pub mod tasks;
 pub mod telemetry;
 pub mod users;
+pub mod work_logs;

@@ -65,7 +65,7 @@ pub struct TaskListQuery {
         ("project_id" = Uuid, Path, description = "Project id"),
         ("progress" = Option<bool>, Query, description = "Legacy compatibility flag. When true, task list response is empty; use /progress endpoints instead."),
         ("task_id" = Option<Uuid>, Query, description = "Optional task filter used only with progress=true."),
-        ("q" = Option<String>, Query, description = "Title search keyword."),
+        ("q" = Option<String>, Query, description = "Title search keyword. Trimmed; max 128 characters. '%' and '_' are treated as literal characters."),
         ("status" = Option<String>, Query, description = "Filter by task status. Supports comma-separated values (e.g. todo,done)."),
         ("assignee_id" = Option<Uuid>, Query, description = "Filter by assignee user id."),
         ("start_from" = Option<String>, Query, description = "Filter tasks with start_date >= this timestamp (RFC3339 or YYYY-MM-DD)."),
@@ -74,8 +74,8 @@ pub struct TaskListQuery {
         ("due_to" = Option<String>, Query, description = "Filter tasks with due_date <= this timestamp (RFC3339 or YYYY-MM-DD)."),
         ("sort_by" = Option<TaskSortBy>, Query, description = "Sort field."),
         ("sort_dir" = Option<TaskSortDir>, Query, description = "Sort direction."),
-        ("page" = Option<u32>, Query, description = "Page number (1-based, default 1)."),
-        ("per_page" = Option<u32>, Query, description = "Items per page (default 50, max 100).")
+        ("page" = Option<u32>, Query, description = "Page number (1-based, default 1). Values below 1 are treated as 1."),
+        ("per_page" = Option<u32>, Query, description = "Items per page (default 50). Clamped to 1..100.")
     ),
     responses((status = 200, description = "List tasks", body = [Task], headers(
         ("X-Total-Count" = i64, description = "Total number of matching tasks")
@@ -97,7 +97,7 @@ pub async fn list_tasks(
             // ensure task belongs to project
             let _ = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
             let simple = sqlx::query_as::<_, DbProgress>(
-                "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                "SELECT id, project_id, task_id, progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
             )
             .bind(task_id)
             .fetch_all(&state.pool)
@@ -110,7 +110,7 @@ pub async fn list_tasks(
                     let project_case = uuid_sql::case_uuid("project_id");
                     let task_case = uuid_sql::case_uuid("task_id");
                     let sql = format!(
-                                "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                                "SELECT {} , {} , {} , progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
                                 id_case, project_case, task_case
                             );
 
@@ -129,7 +129,7 @@ pub async fn list_tasks(
             }
         } else {
             let simple = sqlx::query_as::<_, DbProgress>(
-                "SELECT id, project_id, task_id, progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                "SELECT id, project_id, task_id, progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
             )
             .bind(project_id)
             .fetch_all(&state.pool)
@@ -142,7 +142,7 @@ pub async fn list_tasks(
                     let project_case = uuid_sql::case_uuid("project_id");
                     let task_case = uuid_sql::case_uuid("task_id");
                     let sql = format!(
-                        "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                        "SELECT {} , {} , {} , progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
                         id_case, project_case, task_case
                     );
 
@@ -178,6 +178,7 @@ pub async fn list_tasks(
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).clamp(1, 100);
     let offset = (page - 1) * per_page;
+    let search_q = normalize_search_query(query.q)?;
 
     let sort_by = resolve_sort_column(query.sort_by)?;
     let sort_dir = resolve_sort_dir(query.sort_dir)?;
@@ -186,9 +187,9 @@ pub async fn list_tasks(
     let mut conditions = vec![match_proj, "t.deleted_at IS NULL".to_string()];
     let mut binds: Vec<String> = vec![project_id.to_string(), project_id.to_string()];
 
-    if let Some(q) = query.q {
-        conditions.push("LOWER(t.title) LIKE LOWER(?)".to_string());
-        binds.push(format!("%{}%", q));
+    if let Some(q) = search_q {
+        conditions.push("LOWER(t.title) LIKE LOWER(?) ESCAPE '\\'".to_string());
+        binds.push(format!("%{}%", escape_like_pattern(&q)));
     }
 
     if let Some(status_raw) = query.status {
@@ -1141,6 +1142,29 @@ fn split_csv_values(raw: &str) -> Vec<&str> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .collect()
+}
+
+fn normalize_search_query(q: Option<String>) -> AppResult<Option<String>> {
+    match q {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            if trimmed.chars().count() > 128 {
+                return Err(AppError::bad_request("q must be at most 128 characters"));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn escape_like_pattern(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn normalize_create_description(title: &str, description: Option<&str>) -> String {

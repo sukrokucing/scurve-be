@@ -57,6 +57,7 @@ impl TryFrom<DbProgress> for Progress {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProgressCreateRequest {
     #[schema(example = 75)]
     pub progress: i32,
@@ -65,6 +66,7 @@ pub struct ProgressCreateRequest {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProgressUpdateRequest {
     pub progress: Option<i32>,
     pub note: Option<String>,

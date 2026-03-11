@@ -34,6 +34,11 @@ async fn blob_user_ids_do_not_break_project_and_member_creation_with_foreign_key
         .connect_with(opts)
         .await?;
 
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .context("failed to run migrations on cloned test db")?;
+
     let owner_id = Uuid::new_v4();
     let member_id = Uuid::new_v4();
     let now = Utc::now();
@@ -105,6 +110,10 @@ async fn blob_user_ids_do_not_break_project_and_member_creation_with_foreign_key
     let viewer_role_id: String = sqlx::query_scalar("SELECT id FROM roles WHERE name = 'viewer'")
         .fetch_one(&pool)
         .await?;
+    let unclassified_resource_role_id: String =
+        sqlx::query_scalar("SELECT id FROM resource_roles WHERE name = 'unclassified'")
+            .fetch_one(&pool)
+            .await?;
 
     let create_member_req = Request::builder()
         .method("POST")
@@ -114,7 +123,8 @@ async fn blob_user_ids_do_not_break_project_and_member_creation_with_foreign_key
         .body(Body::from(
             json!({
                 "user_id": member_id,
-                "role_id": viewer_role_id
+                "access_role_id": viewer_role_id,
+                "resource_role_ids": [unclassified_resource_role_id]
             })
             .to_string(),
         ))?;

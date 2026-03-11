@@ -304,6 +304,16 @@ async fn task_list_filters_and_legacy_progress_route_work() -> Result<()> {
     .await?;
 
     sqlx::query(
+        "INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, 'Budget 100% Plan', 'todo', ?, ?)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(project_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
         "INSERT INTO task_progress (id, task_id, project_id, progress, note, created_at, updated_at) VALUES (?, ?, ?, 40, 'legacy route', ?, ?)",
     )
     .bind(Uuid::new_v4().to_string())
@@ -339,6 +349,53 @@ async fn task_list_filters_and_legacy_progress_route_work() -> Result<()> {
     let tasks: Vec<Value> = serde_json::from_slice(&body)?;
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0]["title"], "Backend Worker");
+
+    // Whitespace in q should be trimmed.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/projects/{}/tasks?q=%20%20Backend%20%20",
+                    project_id
+                ))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let total = response
+        .headers()
+        .get("x-total-count")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(total, "2");
+
+    // Wildcards should be treated literally, not match-all.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/projects/{}/tasks?q=%25", project_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let total = response
+        .headers()
+        .get("x-total-count")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(total, "1");
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let wildcard_tasks: Vec<Value> = serde_json::from_slice(&body)?;
+    assert_eq!(wildcard_tasks.len(), 1);
+    assert_eq!(wildcard_tasks[0]["title"], "Budget 100% Plan");
 
     let response = app
         .clone()
@@ -379,7 +436,7 @@ async fn task_list_filters_and_legacy_progress_route_work() -> Result<()> {
         .and_then(|h| h.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    assert_eq!(total, "3");
+    assert_eq!(total, "4");
 
     let response = app
         .clone()
@@ -387,6 +444,19 @@ async fn task_list_filters_and_legacy_progress_route_work() -> Result<()> {
             Request::builder()
                 .method("GET")
                 .uri(format!("/projects/{}/tasks?sort_dir=down", project_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let too_long_q = "a".repeat(129);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/projects/{}/tasks?q={}", project_id, too_long_q))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())?,
         )

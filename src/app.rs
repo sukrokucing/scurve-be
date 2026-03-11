@@ -12,7 +12,9 @@ use crate::authz::RoutePermissionCache;
 use crate::errors::AppError;
 use crate::events::{self, EventBus};
 use crate::jwt::JwtConfig;
-use crate::routes::{auth, health, progress, projects, rbac, tasks, telemetry, users};
+use crate::routes::{
+    auth, health, progress, projects, rbac, resource_roles, tasks, telemetry, users, work_logs,
+};
 
 fn env_var_u32(name: &str, default: u32) -> u32 {
     std::env::var(name)
@@ -180,9 +182,29 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/", post(projects::create_project_member))
         .route("/:user_id", delete(projects::delete_project_member));
 
+    let resource_role_routes = Router::new()
+        .route("/", get(resource_roles::list_resource_roles))
+        .route("/", post(resource_roles::create_resource_role))
+        .route("/:id", put(resource_roles::update_resource_role))
+        .route("/:id", delete(resource_roles::delete_resource_role));
+
+    let project_resource_role_routes = Router::new()
+        .route("/", get(resource_roles::list_project_resource_roles))
+        .route(
+            "/:resource_role_id/rate",
+            put(resource_roles::upsert_project_resource_role_rate)
+                .delete(resource_roles::delete_project_resource_role_rate),
+        );
+
     // Backward-compatible route for task progress lookup without project_id in path.
     let legacy_task_progress_routes =
         Router::new().route("/", get(progress::list_progress_by_task));
+
+    let work_log_routes = Router::new()
+        .route("/", get(work_logs::list_work_logs))
+        .route("/", post(work_logs::create_work_log))
+        .route("/:id", put(work_logs::update_work_log))
+        .route("/:id", delete(work_logs::delete_work_log));
 
     let telemetry_routes = Router::new().route("/events", post(telemetry::ingest_events));
 
@@ -194,10 +216,19 @@ pub fn api_routes(state: AppState) -> Router {
     // Protected routes (require authentication and authorization)
     let protected_routes = Router::new()
         .nest("/users", user_routes)
+        .nest("/resource-roles", resource_role_routes)
         .nest("/projects", project_routes)
         .nest("/projects/:project_id/assignees", project_assignee_routes)
         .nest("/projects/:project_id/members", project_member_routes)
+        .nest(
+            "/projects/:project_id/resource-roles",
+            project_resource_role_routes,
+        )
         .nest("/projects/:project_id/tasks", task_routes)
+        .nest(
+            "/projects/:project_id/tasks/:task_id/work-logs",
+            work_log_routes,
+        )
         .nest(
             "/projects/:project_id/tasks/:task_id/progress",
             progress_routes,
