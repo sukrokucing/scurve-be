@@ -15,7 +15,6 @@ use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::dependency::{DependencyCreateRequest, TaskDependency};
-use crate::models::progress::DbProgress;
 use crate::models::task::{
     DbTask, Task, TaskActivityEntry, TaskAssignee, TaskBatchDeleteRequest, TaskBatchDeleteResponse,
     TaskCreateRequest, TaskUpdateRequest,
@@ -92,74 +91,10 @@ pub async fn list_tasks(
     if query.progress.unwrap_or(false) {
         // verify project membership
         ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
-
-        let _rows = if let Some(task_id) = query.task_id {
-            // ensure task belongs to project
+        if let Some(task_id) = query.task_id {
+            // Keep legacy behavior: validate the referenced task belongs to the project.
             let _ = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
-            let simple = sqlx::query_as::<_, DbProgress>(
-                "SELECT id, project_id, task_id, progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
-            )
-            .bind(task_id)
-            .fetch_all(&state.pool)
-            .await;
-
-            match simple {
-                Ok(rows) => rows,
-                Err(_) => {
-                    let id_case = uuid_sql::case_uuid("id");
-                    let project_case = uuid_sql::case_uuid("project_id");
-                    let task_case = uuid_sql::case_uuid("task_id");
-                    let sql = format!(
-                                "SELECT {} , {} , {} , progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
-                                id_case, project_case, task_case
-                            );
-
-                    let rows = sqlx::query(&sql)
-                        .bind(task_id.to_string())
-                        .fetch_all(&state.pool)
-                        .await?;
-
-                    let mut parsed = Vec::with_capacity(rows.len());
-                    for row in rows {
-                        parsed.push(row_parsers::db_progress_from_row(&row)?);
-                    }
-
-                    parsed
-                }
-            }
-        } else {
-            let simple = sqlx::query_as::<_, DbProgress>(
-                "SELECT id, project_id, task_id, progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
-            )
-            .bind(project_id)
-            .fetch_all(&state.pool)
-            .await;
-
-            match simple {
-                Ok(rows) => rows,
-                Err(_) => {
-                    let id_case = uuid_sql::case_uuid("id");
-                    let project_case = uuid_sql::case_uuid("project_id");
-                    let task_case = uuid_sql::case_uuid("task_id");
-                    let sql = format!(
-                        "SELECT {} , {} , {} , progress, note, actual_hours, actual_cost, created_at, updated_at, deleted_at FROM task_progress WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
-                        id_case, project_case, task_case
-                    );
-
-                    let rows = sqlx::query(&sql)
-                        .bind(project_id.to_string())
-                        .fetch_all(&state.pool)
-                        .await?;
-
-                    let mut parsed = Vec::with_capacity(rows.len());
-                    for row in rows {
-                        parsed.push(row_parsers::db_progress_from_row(&row)?);
-                    }
-
-                    parsed
-                }
-            }
-        };
+        }
 
         // Convert to Progress and then to Task-like JSON via serde Value? We will return empty Vec<Task> to satisfy signature
         // But to avoid breaking the signature, we'll return an empty task list when progress=true — caller should use the progress endpoints.

@@ -45,7 +45,7 @@ The `rust-service` container is usually idle (`tail -f /dev/null`), so run comma
 docker exec rust-service sh -lc 'touch /apps/scurve-be/scurve.sqlite && chmod 664 /apps/scurve-be/scurve.sqlite'
 
 # 2) run migrations
-docker exec rust-service cargo run \
+docker exec rust-service cargo +1.88.0 run \
   --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target \
   --release --bin cli -- migrate-run
@@ -53,13 +53,13 @@ docker exec rust-service cargo run \
 # 3) start API (TLS enabled with mounted certs)
 docker exec rust-service env RUST_BACKTRACE=1 \
   CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
-  cargo run --manifest-path /apps/scurve-be/Cargo.toml \
+  cargo +1.88.0 run --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target --profile local-release
 
 # 4) optional production-like startup
 docker exec rust-service env RUST_BACKTRACE=1 \
   CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
-  cargo run --manifest-path /apps/scurve-be/Cargo.toml \
+  cargo +1.88.0 run --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target --release
 ```
 
@@ -73,6 +73,7 @@ Important:
 
 - Prefer `docker exec rust-service cargo ...` over `docker exec ... sh -lc 'cargo ...'`.
 - In this container, `sh -lc` may not include Cargo in `PATH`.
+- Current dependency graph requires Rust 1.88 (`time` crate). Use `cargo +1.88.0 ...` in the container.
 
 ### Faster Docker compile/restart
 
@@ -80,7 +81,7 @@ If you restart the API frequently, compile once and run the binary directly:
 
 ```bash
 # compile once
-docker exec rust-service cargo build \
+docker exec rust-service cargo +1.88.0 build \
   --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target \
   --profile local-release
@@ -94,7 +95,7 @@ docker exec rust-service env RUST_BACKTRACE=1 \
 Production-like variant:
 
 ```bash
-docker exec rust-service cargo build \
+docker exec rust-service cargo +1.88.0 build \
   --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target \
   --release
@@ -125,6 +126,8 @@ Common optional variables:
 
 - `CERT_PATH`, `KEY_PATH`: enable TLS (and browser HTTP/2 via ALPN)
 - `AUTHZ_MODE`: `off` | `advisory` | `strict`
+- `AUTHZ_PRINCIPAL_CACHE_MS`: in-memory principal cache TTL in milliseconds (default `0`, disabled)
+- `UUID_TEXT_FAST_PATH`: `true|false` fast UUID predicate mode; enable only after UUID canonicalization migration
 - `SCURVE_COST_CURRENCY`: fallback ISO currency code for cost metrics (default `USD`)
 - `SHOW_ERRORS`: include debug detail in error payloads when `true`/`1`
 - `AUTH_RATE_PER_SECOND`, `AUTH_BURST_SIZE`
@@ -265,22 +268,50 @@ Docker test commands (`rust-service`):
 
 ```bash
 # run all unit + integration tests
-docker exec rust-service cargo test \
+docker exec rust-service cargo +1.88.0 test \
   --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target \
   --tests
 
 # run one test file
-docker exec rust-service cargo test \
+docker exec rust-service cargo +1.88.0 test \
   --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target \
   --test ownership_isolation
 ```
 
+One-command validation (`Makefile`):
+
+```bash
+# full validation: smoke + fmt + tests + audit + deny
+make validate
+
+# skip runtime smoke (useful in CI or when API is not running)
+make validate-no-smoke
+```
+
+Common overrides:
+
+```bash
+make validate SERVICE=rust-service BASE_URL=https://localhost:8800
+make smoke CLEANUP_PROJECT=0
+```
+
+Runtime smoke test (hits auth/project/task/work-log/S-curve/dashboard paths):
+
+```bash
+# API must already be running
+./scripts/smoke_api.sh
+
+# optional overrides
+BASE_URL=https://localhost:8800 INSECURE_TLS=1 ./scripts/smoke_api.sh
+CLEANUP_PROJECT=0 ./scripts/smoke_api.sh
+```
+
 If `scurve.sqlite` is missing/outdated, refresh it first:
 
 ```bash
-docker exec rust-service cargo run \
+docker exec rust-service cargo +1.88.0 run \
   --manifest-path /apps/scurve-be/Cargo.toml \
   --target-dir /apps/scurve-be/target \
   --release --bin cli -- migrate-run
@@ -290,4 +321,5 @@ docker exec rust-service cargo run \
 
 - `failed to run migrations`: run `cargo run --bin cli -- migrate-status` and ensure `DATABASE_URL` points to the intended SQLite file.
 - `cargo: not found` in container: do not wrap with `sh -lc`; run Cargo directly via `docker exec rust-service cargo ...`.
+- `rustc 1.87.0 is not supported` for `time`: run with `cargo +1.88.0 ...` (or install/use Rust 1.88 toolchain in the container).
 - Swagger loads but calls wrong scheme: check whether `CERT_PATH`/`KEY_PATH` are set and restart the server.

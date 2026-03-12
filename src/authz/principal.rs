@@ -1,5 +1,7 @@
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{OnceLock, RwLock};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// Principal represents the authenticated user with their cached permissions
@@ -47,6 +49,28 @@ fn decode_uuidish_text_column(row: &SqliteRow, column: &str) -> Result<String, s
     row.try_get::<String, _>(column)
 }
 
+#[derive(Clone)]
+struct PrincipalCacheEntry {
+    principal: Principal,
+    expires_at: Instant,
+}
+
+fn principal_cache() -> &'static RwLock<HashMap<Uuid, PrincipalCacheEntry>> {
+    static CACHE: OnceLock<RwLock<HashMap<Uuid, PrincipalCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn principal_cache_ttl() -> Duration {
+    static TTL: OnceLock<Duration> = OnceLock::new();
+    *TTL.get_or_init(|| {
+        let ms = std::env::var("AUTHZ_PRINCIPAL_CACHE_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        Duration::from_millis(ms)
+    })
+}
+
 impl Principal {
     #[allow(dead_code)]
     pub fn new(user_id: Uuid) -> Self {
@@ -60,6 +84,40 @@ impl Principal {
 
     /// Load roles and permissions from the database for a given user
     pub async fn load(user_id: Uuid, pool: &SqlitePool) -> Result<Self, sqlx::Error> {
+        let ttl = principal_cache_ttl();
+        if ttl.is_zero() {
+            return Self::load_uncached(user_id, pool).await;
+        }
+
+        let now = Instant::now();
+        if let Ok(cache) = principal_cache().read() {
+            if let Some(entry) = cache.get(&user_id) {
+                if entry.expires_at > now {
+                    return Ok(entry.principal.clone());
+                }
+            }
+        }
+
+        let principal = Self::load_uncached(user_id, pool).await?;
+
+        if let Ok(mut cache) = principal_cache().write() {
+            let now = Instant::now();
+            cache.insert(
+                user_id,
+                PrincipalCacheEntry {
+                    principal: principal.clone(),
+                    expires_at: now + ttl,
+                },
+            );
+            if cache.len() > 4096 {
+                cache.retain(|_, entry| entry.expires_at > now);
+            }
+        }
+
+        Ok(principal)
+    }
+
+    async fn load_uncached(user_id: Uuid, pool: &SqlitePool) -> Result<Self, sqlx::Error> {
         use crate::db::uuid_sql::{case_uuid, match_uuid_clause};
 
         // 1. Load role names
@@ -180,6 +238,20 @@ impl Principal {
             permissions,
             scoped_permissions,
         })
+    }
+
+    #[allow(dead_code)]
+    pub fn invalidate_cache_for(user_id: Uuid) {
+        if let Ok(mut cache) = principal_cache().write() {
+            cache.remove(&user_id);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn invalidate_cache_all() {
+        if let Ok(mut cache) = principal_cache().write() {
+            cache.clear();
+        }
     }
 
     #[allow(dead_code)]

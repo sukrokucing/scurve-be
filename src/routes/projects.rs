@@ -1265,25 +1265,30 @@ pub async fn list_my_project_scopes(
     auth: AuthUser,
 ) -> AppResult<Json<Vec<MyProjectScopeSummary>>> {
     let user_match = uuid_sql::match_uuid_clause("pm.user_id");
-    let membership_case = uuid_sql::case_uuid("pm.id");
     let project_case = uuid_sql::case_uuid("pm.project_id");
     let role_case = uuid_sql::case_uuid("pm.access_role_id");
+    let member_role_case = uuid_sql::case_uuid("pmrr.resource_role_id");
     let sql = format!(
         "SELECT
-            {} ,
             {} ,
             p.name AS project_name,
             {} ,
             r.name AS access_role_name,
-            perm.name AS permission_name
+            perm.name AS permission_name,
+            {} ,
+            rr.name AS resource_role_name
          FROM project_members pm
          INNER JOIN projects p ON p.id = pm.project_id
          INNER JOIN roles r ON r.id = pm.access_role_id
          LEFT JOIN role_permissions rp ON rp.role_id = pm.access_role_id
          LEFT JOIN permissions perm ON perm.id = rp.permission_id
+         LEFT JOIN project_member_resource_roles pmrr
+           ON pmrr.membership_id = pm.id AND pmrr.deleted_at IS NULL
+         LEFT JOIN resource_roles rr
+           ON rr.id = pmrr.resource_role_id AND rr.deleted_at IS NULL
          WHERE {} AND pm.deleted_at IS NULL AND p.deleted_at IS NULL
-         ORDER BY p.name ASC, perm.name ASC",
-        membership_case, project_case, role_case, user_match
+         ORDER BY p.name ASC, perm.name ASC, rr.name ASC",
+        project_case, role_case, member_role_case, user_match
     );
 
     let rows = sqlx::query(&sql)
@@ -1292,46 +1297,66 @@ pub async fn list_my_project_scopes(
         .fetch_all(&state.pool)
         .await?;
 
-    let mut grouped: std::collections::BTreeMap<String, (Uuid, MyProjectScopeSummary)> =
+    let mut grouped: std::collections::BTreeMap<String, MyProjectScopeSummary> =
         std::collections::BTreeMap::new();
 
     for row in rows {
-        let membership_id_s: String = row.try_get("id")?;
         let project_id_s: String = row.try_get("project_id")?;
         let access_role_id_s: String = row.try_get("access_role_id")?;
-        let membership_id = Uuid::parse_str(&membership_id_s)
-            .map_err(|e| AppError::internal(format!("invalid membership id: {}", e)))?;
         let project_id = Uuid::parse_str(&project_id_s)
             .map_err(|e| AppError::internal(format!("invalid project id: {}", e)))?;
         let access_role_id = Uuid::parse_str(&access_role_id_s)
             .map_err(|e| AppError::internal(format!("invalid access role id: {}", e)))?;
         let permission_name: Option<String> = row.try_get("permission_name")?;
+        let resource_role_id_s: Option<String> = row.try_get("resource_role_id")?;
+        let resource_role_name: Option<String> = row.try_get("resource_role_name")?;
 
-        let entry = grouped.entry(project_id_s.clone()).or_insert_with(|| {
-            (
-                membership_id,
-                MyProjectScopeSummary {
-                    project_id,
-                    project_name: row.try_get("project_name").unwrap_or_default(),
-                    access_role_id,
-                    access_role_name: row.try_get("access_role_name").unwrap_or_default(),
-                    resource_roles: Vec::new(),
-                    permissions: Vec::new(),
-                },
-            )
-        });
+        let entry = grouped
+            .entry(project_id_s.clone())
+            .or_insert_with(|| MyProjectScopeSummary {
+                project_id,
+                project_name: row.try_get("project_name").unwrap_or_default(),
+                access_role_id,
+                access_role_name: row.try_get("access_role_name").unwrap_or_default(),
+                resource_roles: Vec::new(),
+                permissions: Vec::new(),
+            });
         if let Some(permission_name) = permission_name {
-            if !entry.1.permissions.contains(&permission_name) {
-                entry.1.permissions.push(permission_name);
+            if !entry.permissions.contains(&permission_name) {
+                entry.permissions.push(permission_name);
+            }
+        }
+        if let (Some(resource_role_id_s), Some(resource_role_name)) =
+            (resource_role_id_s, resource_role_name)
+        {
+            let resource_role_id = Uuid::parse_str(&resource_role_id_s)
+                .map_err(|e| AppError::internal(format!("invalid resource role id: {}", e)))?;
+            if !entry
+                .resource_roles
+                .iter()
+                .any(|existing| existing.id == resource_role_id)
+            {
+                entry
+                    .resource_roles
+                    .push(crate::models::resource_role::ResourceRoleRef {
+                        id: resource_role_id,
+                        name: resource_role_name,
+                    });
             }
         }
     }
 
-    let mut items = Vec::with_capacity(grouped.len());
-    for (_, (membership_id, mut scope)) in grouped {
-        scope.resource_roles = fetch_member_resource_roles(&state.pool, membership_id).await?;
-        scope.permissions.sort();
-        items.push(scope);
+    let mut items: Vec<MyProjectScopeSummary> = grouped
+        .into_values()
+        .map(|mut scope| {
+            scope.permissions.sort();
+            scope.resource_roles.sort_by(|a, b| a.name.cmp(&b.name));
+            scope
+        })
+        .collect();
+
+    if items.is_empty() {
+        return Ok(Json(items));
     }
     items.sort_by(|a, b| a.project_name.cmp(&b.project_name));
     Ok(Json(items))
@@ -1400,13 +1425,34 @@ pub async fn get_portfolio_s_curve_summary(
         .fetch_all(&state.pool)
         .await?;
 
-    let mut projects = Vec::with_capacity(rows.len());
+    let mut project_inputs = Vec::with_capacity(rows.len());
     for row in rows {
         let project_id_s: String = row.try_get("id")?;
         let project_id = Uuid::parse_str(&project_id_s)
             .map_err(|e| AppError::internal(format!("invalid project id: {}", e)))?;
         let project_name: String = row.try_get("name")?;
-        let health = compute_project_s_curve_health(&state.pool, project_id, metric).await?;
+        project_inputs.push((project_id, project_name));
+    }
+
+    let mut projects = Vec::with_capacity(project_inputs.len());
+    let worker_limit = std::cmp::max(1, std::cmp::min(4, project_inputs.len()));
+    let mut pending = project_inputs.into_iter();
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for _ in 0..worker_limit {
+        if let Some((project_id, project_name)) = pending.next() {
+            let pool = state.pool.clone();
+            join_set.spawn(async move {
+                let health = compute_project_s_curve_health(&pool, project_id, metric).await;
+                (project_id, project_name, health)
+            });
+        }
+    }
+
+    while let Some(joined) = join_set.join_next().await {
+        let (project_id, project_name, health_result) = joined
+            .map_err(|e| AppError::internal(format!("portfolio worker join error: {}", e)))?;
+        let health = health_result?;
         projects.push(PortfolioSCurveProjectSummary {
             project_id,
             project_name,
@@ -1425,7 +1471,17 @@ pub async fn get_portfolio_s_curve_summary(
             currency: health.currency.clone(),
             last_updated_at: health.last_updated_at,
         });
+
+        if let Some((next_project_id, next_project_name)) = pending.next() {
+            let pool = state.pool.clone();
+            join_set.spawn(async move {
+                let health = compute_project_s_curve_health(&pool, next_project_id, metric).await;
+                (next_project_id, next_project_name, health)
+            });
+        }
     }
+
+    projects.sort_by(|a, b| a.project_name.cmp(&b.project_name));
 
     let avg_planned_pct = avg_option(projects.iter().map(|p| p.planned_pct));
     let avg_actual_pct = avg_option(projects.iter().map(|p| p.actual_pct));

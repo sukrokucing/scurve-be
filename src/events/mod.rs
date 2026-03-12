@@ -11,7 +11,7 @@ pub use loggable::{Loggable, Severity};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainEvent<T> {
     pub id: Uuid,
-    pub name: &'static str,
+    pub name: String,
     pub occurred_at: DateTime<Utc>,
     pub actor_id: Option<Uuid>,
     pub subject_id: Option<Uuid>,
@@ -20,14 +20,14 @@ pub struct DomainEvent<T> {
 
 impl<T> DomainEvent<T> {
     pub fn new(
-        name: &'static str,
+        name: impl Into<String>,
         actor_id: Option<Uuid>,
         subject_id: Option<Uuid>,
         payload: T,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name,
+            name: name.into(),
             occurred_at: Utc::now(),
             actor_id,
             subject_id,
@@ -143,10 +143,6 @@ pub fn log_activity_with_context<T: Loggable>(
     // Build event name like "task.created"
     let event_name = format!("{}.{}", T::entity_type(), action);
 
-    // We need a 'static lifetime for name, so we leak the string.
-    // This is acceptable because event names are a small, bounded set.
-    let static_name: &'static str = Box::leak(event_name.into_boxed_str());
-
     // Build structured payload with dynamic severity
     let severity = entity.severity_for_action(action);
     let payload = ActivityPayload {
@@ -157,7 +153,7 @@ pub fn log_activity_with_context<T: Loggable>(
     };
 
     let event = DomainEvent::new(
-        static_name,
+        event_name,
         actor_id,
         Some(entity.subject_id()),
         serde_json::to_value(&payload).unwrap_or_default(),
@@ -169,6 +165,16 @@ pub fn log_activity_with_context<T: Loggable>(
 
 pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: SqlitePool) {
     tracing::info!("Activity listener started");
+    // Keep the most recent event-store hash in-memory to avoid a full scan for
+    // every new event insert.
+    let mut last_hash: Option<String> = sqlx::query_scalar(
+        "SELECT hash FROM event_store ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten();
+
     while let Ok(event) = rx.recv().await {
         // We clone the event to use it for properties JSON, while extracting fields for columns
         let event_json = event.clone();
@@ -247,13 +253,7 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
         let event_store_id = Uuid::new_v4();
         let payload_str = event_json_str;
 
-        // Get the previous hash from the last event
-        let prev_hash_result: Option<String> =
-            sqlx::query_scalar("SELECT hash FROM event_store ORDER BY created_at DESC LIMIT 1")
-                .fetch_optional(&pool)
-                .await
-                .ok()
-                .flatten();
+        let prev_hash_result = last_hash.clone();
 
         // Compute SHA256(prev_hash || payload)
         use sha2::{Digest, Sha256};
@@ -288,6 +288,8 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
 
         if let Err(e) = event_store_result {
             tracing::error!("Failed to save to event store: {}", e);
+        } else {
+            last_hash = Some(hash);
         }
     }
 }

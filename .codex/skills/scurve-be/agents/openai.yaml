@@ -1,0 +1,4 @@
+interface:
+  display_name: "SCurve BE Backend"
+  short_description: "Workflow and quality gate for scurve-be backend tasks"
+  default_prompt: "Use $scurve-be to implement and validate a backend change in this repository."
