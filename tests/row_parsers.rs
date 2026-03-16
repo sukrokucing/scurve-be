@@ -110,7 +110,7 @@ async fn parse_progress_row_numeric_timestamps_and_text_progress() {
 async fn parse_task_row_text_uuid() {
     let pool = setup_pool().await;
     sqlx::query(
-        "CREATE TABLE tasks (id TEXT, project_id TEXT, title TEXT, description TEXT, status TEXT, due_date TEXT, start_date TEXT, end_date TEXT, duration_days INTEGER, assignee TEXT, parent_id TEXT, progress INTEGER, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
+        "CREATE TABLE tasks (id TEXT, project_id TEXT, title TEXT, description TEXT, status TEXT, due_date TEXT, start_date TEXT, end_date TEXT, duration_days INTEGER, assignee TEXT, parent_id TEXT, progress INTEGER, completed_at TEXT, completed_at_is_backfilled INTEGER, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
     )
     .execute(&pool)
     .await
@@ -121,7 +121,7 @@ async fn parse_task_row_text_uuid() {
     let assignee = Uuid::new_v4();
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query("INSERT INTO tasks (id, project_id, title, description, status, due_date, start_date, end_date, duration_days, assignee, parent_id, progress, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO tasks (id, project_id, title, description, status, due_date, start_date, end_date, duration_days, assignee, parent_id, progress, completed_at, completed_at_is_backfilled, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(id.to_string())
         .bind(project_id.to_string())
         .bind("T")
@@ -134,6 +134,8 @@ async fn parse_task_row_text_uuid() {
         .bind(Some(assignee.to_string()))
         .bind(Option::<String>::None)
         .bind(0i32)
+        .bind(Option::<String>::None)
+        .bind(0i64)
         .bind(now.clone())
         .bind(now.clone())
         .bind(Option::<String>::None)

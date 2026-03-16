@@ -15,16 +15,19 @@ fn use_text_fast_path() -> bool {
     })
 }
 
-pub fn case_uuid(col: &str) -> String {
-    let alias = col.split('.').next_back().unwrap_or(col);
+pub fn expr_uuid(col: &str) -> String {
     if use_text_fast_path() {
-        return format!("CAST({c} AS TEXT) as {a}", c = col, a = alias);
+        return format!("CAST({c} AS TEXT)", c = col);
     }
     format!(
-        "CAST(CASE WHEN typeof({c})='blob' THEN lower(substr(hex({c}),1,8) || '-' || substr(hex({c}),9,4) || '-' || substr(hex({c}),13,4) || '-' || substr(hex({c}),17,4) || '-' || substr(hex({c}),21)) ELSE {c} END AS TEXT) as {a}",
-        c = col,
-        a = alias
+        "CAST(CASE WHEN typeof({c})='blob' THEN lower(substr(hex({c}),1,8) || '-' || substr(hex({c}),9,4) || '-' || substr(hex({c}),13,4) || '-' || substr(hex({c}),17,4) || '-' || substr(hex({c}),21)) ELSE {c} END AS TEXT)",
+        c = col
     )
+}
+
+pub fn case_uuid(col: &str) -> String {
+    let alias = col.split('.').next_back().unwrap_or(col);
+    format!("{} as {}", expr_uuid(col), alias)
 }
 
 pub fn match_uuid_clause(col: &str) -> String {

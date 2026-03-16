@@ -8,6 +8,8 @@ pub mod rbac;
 pub mod resource_role;
 pub mod s_curve;
 pub mod task;
+pub mod task_health;
+pub mod task_progress_component;
 pub mod telemetry;
 pub mod user;
 pub mod work_log;

@@ -197,6 +197,7 @@ Auth flow in Swagger:
 | DELETE | `/projects/{project_id}/tasks/batch` | Yes | Soft-delete multiple tasks atomically |
 | PUT/DELETE | `/projects/{project_id}/tasks/{id}` | Yes | Update/delete task |
 | GET | `/projects/{project_id}/tasks/{id}/activity` | Yes | Task activity timeline |
+| GET/PUT | `/projects/{project_id}/tasks/{id}/progress-components` | Yes | List/replace weighted progress components for `weighted_components` tasks |
 | GET | `/projects/{project_id}/assignees` | Yes | List distinct assignees used in project tasks |
 | GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | List/create progress |
 | PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | Update/delete progress |
@@ -204,7 +205,8 @@ Auth flow in Swagger:
 | PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/work-logs/{id}` | Yes | Update/soft-delete work log |
 | GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
 | GET | `/users/me/projects` | Yes | My accessible projects + effective scoped permissions |
-| GET | `/projects/{id}/dashboard` | Yes | Dashboard payload with metric series (`metric=progress|hours|cost`) |
+| GET/PUT | `/projects/{project_id}/task-health/rules` | Yes | Read/update effective project task-health thresholds |
+| GET | `/projects/{id}/dashboard` | Yes | Dashboard payload with metric series (`metric=progress|hours|cost`) plus task summary aggregates |
 | GET | `/projects/{id}/s-curve/health` | Yes | S-curve health (`metric=progress|hours|cost`) |
 | GET | `/portfolio/s-curve/summary` | Yes | Portfolio-level S-curve summary |
 | POST | `/telemetry/events` | Yes | Ingest frontend telemetry batch (idempotent by `event_id`) |
@@ -218,10 +220,12 @@ Server-side filtering, sorting, and pagination parameters:
 | --- | --- | --- |
 | `q` | string | Case-insensitive title keyword search |
 | `status` | string | Single status or comma-separated values (e.g. `todo,done`) |
+| `schedule_status` | string | Backend-computed schedule filter: `finished_early`, `overdue`, `on_time`, `not_specified` (comma-separated allowed) |
+| `health_status` | string | Derived task health filter: `ahead`, `on_track`, `at_risk`, `critical`, `needs_plan` (comma-separated allowed) |
 | `assignee_id` | UUID | Filter by assignee |
 | `start_from`, `start_to` | datetime/date | Accepts RFC3339 or `YYYY-MM-DD` |
 | `due_from`, `due_to` | datetime/date | Accepts RFC3339 or `YYYY-MM-DD` |
-| `sort_by` | string | `start_date`, `due_date`, `created_at`, `updated_at`, `title`, `status`, `progress` |
+| `sort_by` | string | `start_date`, `due_date`, `created_at`, `updated_at`, `title`, `status`, `progress`, `expected_progress_pct`, `actual_progress_pct`, `variance_pct`, `health_status` |
 | `sort_dir` | string | `asc` or `desc` (invalid value returns `400`) |
 | `page` | integer | 1-based page number, default `1` |
 | `per_page` | integer | Items per page, default `50`, max `100` |
@@ -240,6 +244,93 @@ Legacy compatibility:
 - `Task`, `TaskCreateRequest`, and `TaskUpdateRequest` now include `description`.
 - On create, if `description` is missing/blank, backend auto-fills: `[Quick Add] {title}`.
 - On update, blank `description` is rejected with `400`.
+
+### Task Health & Progress Model
+
+- `Task` responses now include:
+  - stored planning fields: `progress_method`, `blocked_flag`, `blocked_reason`, `baseline_start_at`, `baseline_end_at`, `task_weight`
+  - derived fields: `execution_status`, `expected_progress_pct`, `actual_progress_pct`, `variance_pct`, `health_status`, `expected_progress_source`, `actual_progress_source`
+- `progress_method` values:
+  - `manual_percent_legacy`
+  - `weighted_components`
+- `execution_status` values:
+  - `not_started`
+  - `in_progress`
+  - `blocked`
+  - `completed`
+- `health_status` values:
+  - `ahead`
+  - `on_track`
+  - `at_risk`
+  - `critical`
+  - `needs_plan`
+- `progress` remains on the API as a compatibility mirror.
+- Direct `progress` writes are only allowed when `progress_method=manual_percent_legacy`.
+- For `weighted_components` tasks, use `GET/PUT /projects/{project_id}/tasks/{id}/progress-components`.
+- If a `weighted_components` task receives direct progress writes through task/progress endpoints, backend returns `400`.
+
+### Task Health Rules
+
+- Global defaults are seeded from `USECASE.md`:
+  - `critical`: variance `< -25`
+  - `at_risk`: variance `>= -25` and `< -10`
+  - `on_track`: variance `>= -10` and `< 10`
+  - `ahead`: variance `>= 10`
+- `GET /projects/{project_id}/task-health/rules` returns the effective rule set for the project.
+- `PUT /projects/{project_id}/task-health/rules` stores a project-scoped override.
+- `needs_plan` is backend-derived and cannot be configured directly.
+
+### Progress Components
+
+- `PUT /projects/{project_id}/tasks/{id}/progress-components` uses full-set replacement.
+- Each component includes:
+  - `name`
+  - `component_type`
+  - `weight`
+  - `completion_pct`
+  - optional `planned_at`
+  - optional `completed_at`
+  - optional `sort_order`
+- Backend computes `actual_progress_pct` as weighted completion:
+  - `SUM(weight * completion_pct) / SUM(weight)`
+- If a `weighted_components` task has no active components, `actual_progress_pct` is `null` and `health_status` becomes `needs_plan`.
+
+### Task Completion & Schedule Status
+
+- `Task` responses now include backend-managed `completed_at`, `completed_at_is_backfilled`, and `schedule_status`.
+- `completed_at` is set when a task is marked complete by task update or reaches `progress=100` through progress history.
+- `completed_at_is_backfilled=true` means the timestamp was reconstructed for legacy data and should not be treated as an explicit completion event.
+- Reopening a task clears `completed_at`.
+- `schedule_status` is computed by backend as one of:
+  - `finished_early`
+  - `overdue`
+  - `on_time`
+  - `not_specified`
+- If a task has no due date, `schedule_status` is `not_specified`.
+
+### Dashboard Summary Fields
+
+`GET /projects/{id}/dashboard` now also returns:
+
+- `overall_progress_pct`
+- `task_status_counts`
+- `workload_distribution`
+- `assignment_coverage_pct`
+- `due_date_coverage_pct`
+
+Summary rules:
+
+- `overall_progress_pct` is the weighted current actual-progress rollup across non-deleted tasks in the project.
+- `task_status_counts` is based on backend-computed schedule status, not raw task status strings.
+- `workload_distribution` includes active project members even when they currently have `task_count=0`.
+- `workload_distribution` currently measures `task_count`, not capacity or estimated hours.
+
+Progress metric source rules:
+
+- Planned progress prefers `project_plan.planned_progress`.
+- If `project_plan` is absent, backend falls back to weighted task `expected_progress_pct`.
+- Actual progress comes from weighted task actual-progress rollups.
+- If weighted task actuals are unavailable, backend falls back to legacy `task_progress.progress` history.
 
 ### Progress vs Work Logs
 

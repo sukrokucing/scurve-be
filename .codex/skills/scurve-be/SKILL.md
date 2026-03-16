@@ -1,6 +1,6 @@
 ---
 name: scurve-be
-description: Use this skill for any backend work in the scurve-be repository (Rust + Axum + SQLite + RBAC + OpenAPI). It provides the fast Docker workflow, safe migration/testing rules, API-contract sync steps, and performance guardrails.
+description: Use this skill for backend work in the scurve-be repository (Rust + Axum + SQLite + RBAC + OpenAPI), especially when implementing or fixing endpoints, editing migrations, updating authorization or route-permission behavior, syncing OpenAPI or README examples, or running the repo's required validation and safety workflow. It provides the fast Docker loop, migration and DB safeguards, API-contract sync steps, and concise risk-aware handoff guidance.
 ---
 
 # S-Curve Backend Skill
@@ -20,6 +20,29 @@ description: Use this skill for any backend work in the scurve-be repository (Ru
 - API commonly runs on TLS `https://localhost:8800` when certs are configured.
 - SQLite DB is file-based (`scurve.sqlite`) and must be handled carefully.
 - Existing test suite is designed to avoid mutating the original DB by cloning to temp DBs.
+
+## Reasoning and Response Policy
+
+For complex backend tasks, use a lightweight structured reasoning loop before making changes.
+
+1. **Decompose** the task into sub-problems such as endpoint logic, data model or migration impact, RBAC implications, API contract changes, and test coverage.
+2. **Solve** each sub-problem separately and track confidence privately on a `0.0-1.0` scale.
+3. **Verify** for logic errors, factual mismatch with repo conventions, incomplete scope, security regressions, data integrity risk, and biased assumptions.
+4. **Synthesize** the final answer or implementation plan by giving extra weight to the lowest-confidence or highest-risk areas.
+5. **Reflect** before handoff. If overall confidence is below `0.8`, identify the weakest assumption, re-check the relevant code, tests, or docs, and revise once before responding.
+
+For simple or localized tasks, skip the full loop and answer directly.
+
+Do not expose full internal chain-of-thought. When useful, provide a concise external summary with:
+- clear answer or implementation result
+- confidence level
+- key caveats, validation gaps, or remaining risks
+
+For implementation-heavy requests, prioritize:
+- what changed
+- files touched
+- tests and validation run
+- remaining caveats or follow-up risk
 
 ## Fast Development Loop
 
@@ -92,9 +115,9 @@ docker exec rust-service cargo +1.88.0 run \
 
 ## API Contract Discipline
 
-Whenever endpoint/request/response behavior changes:
+Whenever endpoint, request, response, or auth behavior changes:
 
-1. Update handler/service/repository code.
+1. Update handler, service, and repository code.
 2. Update or add integration tests in `tests/`.
 3. Regenerate OpenAPI snapshots:
 
@@ -103,7 +126,7 @@ cargo run --bin dump_openapi -- --port 8000 --out openapi.json
 cargo run --bin dump_openapi -- --port 8800 --out openapi-live.json
 ```
 
-4. Update `README.md` endpoint/docs examples if externally visible.
+4. Update `README.md` endpoint or docs examples if externally visible.
 5. Ensure route permissions are synchronized with protected endpoints.
 
 ## RBAC + Membership + Work Log Guardrails
@@ -111,7 +134,7 @@ cargo run --bin dump_openapi -- --port 8800 --out openapi-live.json
 - Treat system RBAC roles and project resource roles as separate concepts.
 - Cross-user operations must enforce scoped permission checks.
 - Work logs must validate project membership and allowed resource-role assignment.
-- Prefer explicit 403/404 behavior without leaking sensitive existence details.
+- Prefer explicit 403 or 404 behavior without leaking sensitive existence details.
 
 ## Performance Guardrails for This Repo
 
@@ -119,11 +142,11 @@ cargo run --bin dump_openapi -- --port 8800 --out openapi-live.json
 - Reuse `/apps/scurve-be/target` to keep incremental cache warm.
 - Avoid unnecessary clean builds.
 - Use `rg` for code search and `cargo test --test <name>` for focused loops.
-- Keep smoke checks deterministic and cleanup test-created project data.
+- Keep smoke checks deterministic and clean up test-created project data.
 
 ## Context7 MCP Usage (Docs Lookup)
 
-Use Context7 for external docs only (framework/libraries). Prefer local source first for repo behavior.
+Use Context7 for external docs only for framework or library behavior. Prefer local source first for repo behavior.
 
 Quick health probe for Context7 client environment:
 
@@ -139,10 +162,21 @@ docker exec -i fe npx -y @playwright/mcp@latest --help
 
 If MCP handshake fails, verify `fe` container is running and re-check `~/.codex/config.toml` MCP command paths.
 
+## Handoff Format
+
+When handing work back to the user, use this compact structure when relevant:
+
+1. **Answer / Result** - What was changed, decided, or recommended.
+2. **Confidence** - Overall confidence from `0.0-1.0`.
+3. **Validation** - Tests, checks, or commands run.
+4. **Key Caveats** - Remaining risks, skipped checks, or assumptions.
+
+Keep the handoff concise. Prefer specifics over narration.
+
 ## Completion Checklist
 
-- [ ] Build/test/audit/deny/smoke done (or documented skip reason)
+- [ ] Build, test, audit, deny, and smoke done (or documented skip reason)
 - [ ] Migration safety validated (if schema touched)
-- [ ] OpenAPI + README synced (if API changed)
-- [ ] RBAC ownership/scoping validated (if auth/resource logic changed)
-- [ ] No destructive DB/test side-effects left behind
+- [ ] OpenAPI and README synced (if API changed)
+- [ ] RBAC ownership and scoping validated (if auth or resource logic changed)
+- [ ] No destructive DB or test side-effects left behind

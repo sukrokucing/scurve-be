@@ -148,6 +148,10 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/", get(tasks::list_tasks))
         .route("/", post(tasks::create_task))
         .route("/:id/activity", get(tasks::list_task_activity))
+        .route(
+            "/:id/progress-components",
+            get(tasks::list_task_progress_components).put(tasks::replace_task_progress_components),
+        )
         .route("/:id", get(tasks::get_task))
         .route("/:id", put(tasks::update_task))
         .route("/:id", delete(tasks::delete_task));
@@ -181,6 +185,11 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/", get(projects::list_project_members))
         .route("/", post(projects::create_project_member))
         .route("/:user_id", delete(projects::delete_project_member));
+
+    let project_task_health_routes = Router::new().route(
+        "/rules",
+        get(projects::get_task_health_rules).put(projects::update_task_health_rules),
+    );
 
     let resource_role_routes = Router::new()
         .route("/", get(resource_roles::list_resource_roles))
@@ -220,6 +229,10 @@ pub fn api_routes(state: AppState) -> Router {
         .nest("/projects", project_routes)
         .nest("/projects/:project_id/assignees", project_assignee_routes)
         .nest("/projects/:project_id/members", project_member_routes)
+        .nest(
+            "/projects/:project_id/task-health",
+            project_task_health_routes,
+        )
         .nest(
             "/projects/:project_id/resource-roles",
             project_resource_role_routes,

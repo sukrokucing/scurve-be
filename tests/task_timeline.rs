@@ -50,6 +50,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         title: "Timeline task".to_string(),
         description: None,
         status: None,
+        progress_method: None,
+        blocked_flag: None,
+        blocked_reason: None,
         due_date: None,
         start_date: Some(
             chrono::DateTime::parse_from_rfc3339("2025-10-01T09:00:00Z")?
@@ -59,6 +62,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
             chrono::DateTime::parse_from_rfc3339("2025-10-05T17:00:00Z")?
                 .with_timezone(&chrono::Utc),
         ),
+        baseline_start_at: None,
+        baseline_end_at: None,
+        task_weight: None,
         assignee: None,
         parent_id: None,
         progress: Some(5),
@@ -87,6 +93,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         title: None,
         description: None,
         status: None,
+        progress_method: None,
+        blocked_flag: None,
+        blocked_reason: None,
         due_date: None,
         start_date: Some(
             chrono::DateTime::parse_from_rfc3339("2025-10-10T00:00:00Z")?
@@ -96,6 +105,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
             chrono::DateTime::parse_from_rfc3339("2025-10-05T00:00:00Z")?
                 .with_timezone(&chrono::Utc),
         ),
+        baseline_start_at: None,
+        baseline_end_at: None,
+        task_weight: None,
         assignee: None,
         parent_id: None,
         progress: None,
@@ -117,9 +129,15 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         title: None,
         description: None,
         status: None,
+        progress_method: None,
+        blocked_flag: None,
+        blocked_reason: None,
         due_date: None,
         start_date: None,
         end_date: None,
+        baseline_start_at: None,
+        baseline_end_at: None,
+        task_weight: None,
         assignee: None,
         parent_id: None,
         progress: Some(150),
@@ -140,6 +158,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         title: Some("Updated Title".to_string()),
         description: None,
         status: None,
+        progress_method: None,
+        blocked_flag: None,
+        blocked_reason: None,
         due_date: None,
         start_date: Some(
             chrono::DateTime::parse_from_rfc3339("2025-11-01T09:00:00Z")?
@@ -149,6 +170,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
             chrono::DateTime::parse_from_rfc3339("2025-11-03T17:00:00Z")?
                 .with_timezone(&chrono::Utc),
         ),
+        baseline_start_at: None,
+        baseline_end_at: None,
+        task_weight: None,
         assignee: None,
         parent_id: None,
         progress: Some(50),
@@ -177,6 +201,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         title: "Early Task".to_string(),
         description: None,
         status: None,
+        progress_method: None,
+        blocked_flag: None,
+        blocked_reason: None,
         due_date: None,
         start_date: Some(
             chrono::DateTime::parse_from_rfc3339("2025-09-01T09:00:00Z")?
@@ -186,6 +213,9 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
             chrono::DateTime::parse_from_rfc3339("2025-09-05T17:00:00Z")?
                 .with_timezone(&chrono::Utc),
         ),
+        baseline_start_at: None,
+        baseline_end_at: None,
+        task_weight: None,
         assignee: None,
         parent_id: None,
         progress: Some(0),
@@ -207,6 +237,8 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         task_id: None,
         q: None,
         status: None,
+        schedule_status: None,
+        health_status: None,
         assignee_id: None,
         start_from: None,
         start_to: None,

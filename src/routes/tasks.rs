@@ -16,9 +16,14 @@ use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::dependency::{DependencyCreateRequest, TaskDependency};
 use crate::models::task::{
-    DbTask, Task, TaskActivityEntry, TaskAssignee, TaskBatchDeleteRequest, TaskBatchDeleteResponse,
-    TaskCreateRequest, TaskUpdateRequest,
+    managed_completed_at, managed_completed_at_is_backfilled, DbTask, Task, TaskActivityEntry,
+    TaskAssignee, TaskBatchDeleteRequest, TaskBatchDeleteResponse, TaskCreateRequest,
+    TaskHealthStatus, TaskProgressMethod, TaskScheduleStatus, TaskUpdateRequest,
 };
+use crate::models::task_progress_component::{
+    ReplaceTaskProgressComponentsRequest, TaskProgressComponent, TaskProgressComponentInput,
+};
+use crate::task_metrics;
 use crate::utils::{normalize_to_midnight, utc_now};
 
 #[derive(Debug, Deserialize, Clone, Copy, utoipa::ToSchema)]
@@ -31,6 +36,10 @@ pub enum TaskSortBy {
     Title,
     Status,
     Progress,
+    ExpectedProgressPct,
+    ActualProgressPct,
+    VariancePct,
+    HealthStatus,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, utoipa::ToSchema)]
@@ -46,6 +55,8 @@ pub struct TaskListQuery {
     pub task_id: Option<Uuid>,
     pub q: Option<String>,
     pub status: Option<String>,
+    pub schedule_status: Option<String>,
+    pub health_status: Option<String>,
     pub assignee_id: Option<Uuid>,
     pub start_from: Option<String>,
     pub start_to: Option<String>,
@@ -66,6 +77,8 @@ pub struct TaskListQuery {
         ("task_id" = Option<Uuid>, Query, description = "Optional task filter used only with progress=true."),
         ("q" = Option<String>, Query, description = "Title search keyword. Trimmed; max 128 characters. '%' and '_' are treated as literal characters."),
         ("status" = Option<String>, Query, description = "Filter by task status. Supports comma-separated values (e.g. todo,done)."),
+        ("schedule_status" = Option<String>, Query, description = "Filter by backend-computed schedule status. Supports comma-separated values: finished_early, overdue, on_time, not_specified."),
+        ("health_status" = Option<String>, Query, description = "Filter by derived task health status. Supports comma-separated values: ahead, on_track, at_risk, critical, needs_plan."),
         ("assignee_id" = Option<Uuid>, Query, description = "Filter by assignee user id."),
         ("start_from" = Option<String>, Query, description = "Filter tasks with start_date >= this timestamp (RFC3339 or YYYY-MM-DD)."),
         ("start_to" = Option<String>, Query, description = "Filter tasks with start_date <= this timestamp (RFC3339 or YYYY-MM-DD)."),
@@ -112,11 +125,12 @@ pub async fn list_tasks(
 
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).clamp(1, 100);
-    let offset = (page - 1) * per_page;
+    let offset = ((page - 1) * per_page) as usize;
     let search_q = normalize_search_query(query.q)?;
-
-    let sort_by = resolve_sort_column(query.sort_by)?;
-    let sort_dir = resolve_sort_dir(query.sort_dir)?;
+    let schedule_statuses = normalize_schedule_status_filter(query.schedule_status)?;
+    let health_statuses = normalize_health_status_filter(query.health_status)?;
+    let sort_by = query.sort_by.unwrap_or(TaskSortBy::StartDate);
+    let sort_dir = query.sort_dir.unwrap_or(TaskSortDir::Asc);
 
     let match_proj = uuid_sql::match_uuid_clause("t.project_id");
     let mut conditions = vec![match_proj, "t.deleted_at IS NULL".to_string()];
@@ -182,32 +196,18 @@ pub async fn list_tasks(
 
     let where_clause = conditions.join(" AND ");
 
-    let count_sql = format!("SELECT COUNT(*) FROM tasks t WHERE {}", where_clause);
-    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-    for bind in &binds {
-        count_query = count_query.bind(bind);
-    }
-    let total_count = count_query.fetch_one(&state.pool).await?;
-
-    let id_case = uuid_sql::case_uuid("t.id");
-    let project_case = uuid_sql::case_uuid("t.project_id");
-    let assignee_case = uuid_sql::case_uuid("t.assignee");
-    let parent_case = uuid_sql::case_uuid("t.parent_id");
-
     let sql = format!(
-        "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
+        "SELECT {} \
          FROM tasks t \
-         WHERE {} \
-         ORDER BY {} {} \
-         LIMIT ? OFFSET ?",
-        id_case, project_case, assignee_case, parent_case, where_clause, sort_by, sort_dir
+         WHERE {}",
+        task_metrics::task_select_columns("t"),
+        where_clause
     );
 
     let mut query_exec = sqlx::query(&sql);
     for bind in &binds {
         query_exec = query_exec.bind(bind);
     }
-    query_exec = query_exec.bind(i64::from(per_page)).bind(i64::from(offset));
 
     let rows = query_exec.fetch_all(&state.pool).await?;
 
@@ -216,10 +216,24 @@ pub async fn list_tasks(
         tasks_rows.push(row_parsers::db_task_from_row(&row)?);
     }
 
-    let tasks: Vec<Task> = tasks_rows
+    let mut tasks =
+        task_metrics::build_task_responses(&state.pool, project_id, tasks_rows, utc_now()).await?;
+
+    if let Some(schedule_statuses) = schedule_statuses {
+        tasks.retain(|task| schedule_statuses.contains(&task.schedule_status));
+    }
+
+    if let Some(health_statuses) = health_statuses {
+        tasks.retain(|task| health_statuses.contains(&task.health_status));
+    }
+
+    sort_tasks(&mut tasks, sort_by, sort_dir);
+    let total_count = tasks.len();
+    let tasks = tasks
         .into_iter()
-        .map(Task::try_from)
-        .collect::<Result<_, _>>()?;
+        .skip(offset)
+        .take(per_page as usize)
+        .collect::<Vec<_>>();
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -255,17 +269,25 @@ pub async fn create_task(
         .clone()
         .unwrap_or_else(|| "pending".to_string());
     let description = normalize_create_description(&payload.title, payload.description.as_deref());
-
-    // Use original dates (removed normalization)
+    let progress_method = payload.progress_method.unwrap_or_default();
+    let blocked_flag = payload.blocked_flag.unwrap_or(false);
+    let blocked_reason = normalize_optional_text(payload.blocked_reason.as_deref());
     let start_date = payload.start_date;
     let end_date = payload.end_date;
+    let baseline_start_at = payload.baseline_start_at;
+    let baseline_end_at = payload.baseline_end_at;
+    let task_weight = validate_task_weight(payload.task_weight.unwrap_or(1.0))?;
+    validate_progress_payload(progress_method, payload.progress)?;
+    let progress = payload.progress.unwrap_or(0);
+    let completed_at = managed_completed_at(&status, progress, None, now);
+    let completed_at_is_backfilled = false;
 
-    // Validate timeline fields
     if let (Some(start), Some(end)) = (start_date, end_date) {
         if end < start {
             return Err(AppError::bad_request("end_date must be >= start_date"));
         }
     }
+    validate_baseline(baseline_start_at, baseline_end_at)?;
 
     if let Some(p) = payload.progress {
         if !(0..=100).contains(&p) {
@@ -275,8 +297,8 @@ pub async fn create_task(
 
     let match_proj = uuid_sql::match_uuid_clause("id");
     let insert_sql = format!(
-        "INSERT INTO tasks (id, project_id, title, description, status, due_date, start_date, end_date, assignee, parent_id, progress, created_at, updated_at) \
-         VALUES (?, (SELECT id FROM projects WHERE {} AND deleted_at IS NULL), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (id, project_id, title, description, status, progress_method, blocked_flag, blocked_reason, due_date, start_date, end_date, baseline_start_at, baseline_end_at, task_weight, assignee, parent_id, progress, completed_at, completed_at_is_backfilled, created_at, updated_at) \
+         VALUES (?, (SELECT id FROM projects WHERE {} AND deleted_at IS NULL), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         match_proj
     );
 
@@ -287,19 +309,31 @@ pub async fn create_task(
         .bind(&payload.title)
         .bind(description)
         .bind(status)
+        .bind(progress_method.as_str())
+        .bind(blocked_flag)
+        .bind(blocked_reason)
         .bind(payload.due_date)
         .bind(start_date)
         .bind(end_date)
+        .bind(baseline_start_at)
+        .bind(baseline_end_at)
+        .bind(task_weight)
         .bind(payload.assignee.map(|id| id.to_string()))
         .bind(payload.parent_id.map(|id| id.to_string()))
-        .bind(payload.progress.unwrap_or(0))
+        .bind(progress)
+        .bind(completed_at)
+        .bind(completed_at_is_backfilled)
         .bind(now)
         .bind(now)
         .execute(&state.pool)
         .await?;
 
+    if progress_method == TaskProgressMethod::WeightedComponents {
+        task_metrics::refresh_task_snapshot(&state.pool, task_id).await?;
+    }
     let task = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
-    let task_dto: Task = task.clone().try_into()?;
+    let task_dto =
+        task_metrics::build_task_response(&state.pool, project_id, task.clone(), now).await?;
 
     // Log activity with request context (no old state for create)
     let ctx = crate::events::RequestContext::from_headers(&headers);
@@ -333,7 +367,9 @@ pub async fn update_task(
 ) -> AppResult<Json<Task>> {
     // Capture old state BEFORE modifications
     let old_task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
-    let old_dto: Task = old_task.clone().try_into()?;
+    let old_dto =
+        task_metrics::build_task_response(&state.pool, project_id, old_task.clone(), utc_now())
+            .await?;
 
     let mut task = old_task;
 
@@ -341,9 +377,15 @@ pub async fn update_task(
         title,
         description,
         status,
+        progress_method,
+        blocked_flag,
+        blocked_reason,
         due_date,
         start_date,
         end_date,
+        baseline_start_at,
+        baseline_end_at,
+        task_weight,
         assignee,
         parent_id,
         progress,
@@ -361,6 +403,15 @@ pub async fn update_task(
     if let Some(status) = status {
         task.status = status;
     }
+    if let Some(progress_method) = progress_method {
+        task.progress_method = progress_method;
+    }
+    if let Some(blocked_flag) = blocked_flag {
+        task.blocked_flag = blocked_flag;
+    }
+    if blocked_reason.is_some() {
+        task.blocked_reason = normalize_optional_text(blocked_reason.as_deref());
+    }
     if let Some(due_date) = due_date {
         task.due_date = Some(due_date);
     }
@@ -371,6 +422,15 @@ pub async fn update_task(
     if let Some(ed) = end_date {
         task.end_date = Some(ed);
     }
+    if let Some(baseline_start_at) = baseline_start_at {
+        task.baseline_start_at = Some(baseline_start_at);
+    }
+    if let Some(baseline_end_at) = baseline_end_at {
+        task.baseline_end_at = Some(baseline_end_at);
+    }
+    if let Some(task_weight) = task_weight {
+        task.task_weight = validate_task_weight(task_weight)?;
+    }
     if let Some(a) = assignee {
         task.assignee = Some(a);
     }
@@ -378,6 +438,7 @@ pub async fn update_task(
         task.parent_id = Some(pid);
     }
     if let Some(p) = progress {
+        validate_progress_payload(task.progress_method, Some(p))?;
         if !(0..=100).contains(&p) {
             return Err(AppError::bad_request("progress must be between 0 and 100"));
         }
@@ -390,29 +451,50 @@ pub async fn update_task(
             return Err(AppError::bad_request("end_date must be >= start_date"));
         }
     }
+    validate_baseline(task.baseline_start_at, task.baseline_end_at)?;
 
     let now = utc_now();
+    let next_completed_at =
+        managed_completed_at(&task.status, task.progress, task.completed_at, now);
+    task.completed_at_is_backfilled = managed_completed_at_is_backfilled(
+        task.completed_at,
+        task.completed_at_is_backfilled,
+        next_completed_at,
+    );
+    task.completed_at = next_completed_at;
 
     sqlx::query(
-        "UPDATE tasks SET title = ?, description = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, updated_at = ? WHERE id = ?",
+        "UPDATE tasks SET title = ?, description = ?, status = ?, progress_method = ?, blocked_flag = ?, blocked_reason = ?, due_date = ?, start_date = ?, end_date = ?, baseline_start_at = ?, baseline_end_at = ?, task_weight = ?, assignee = ?, parent_id = ?, progress = ?, completed_at = ?, completed_at_is_backfilled = ?, updated_at = ? WHERE id = ?",
     )
     .bind(&task.title)
     .bind(&task.description)
     .bind(&task.status)
+    .bind(task.progress_method.as_str())
+    .bind(task.blocked_flag)
+    .bind(&task.blocked_reason)
     .bind(task.due_date)
     .bind(task.start_date)
     .bind(task.end_date)
+    .bind(task.baseline_start_at)
+    .bind(task.baseline_end_at)
+    .bind(task.task_weight)
     .bind(task.assignee.map(|id| id.to_string()))
     .bind(task.parent_id.map(|id| id.to_string()))
     .bind(task.progress)
+    .bind(task.completed_at)
+    .bind(task.completed_at_is_backfilled)
     .bind(now)
     .bind(task.id.to_string())
     .execute(&state.pool)
     .await?;
 
+    if task.progress_method == TaskProgressMethod::WeightedComponents {
+        task_metrics::refresh_task_snapshot(&state.pool, task.id).await?;
+    }
     // Re-fetch to get the DB-calculated fields (like duration_days from triggers)
     let task = fetch_task(&state.pool, auth.user_id, project_id, task.id).await?;
-    let task_dto: Task = task.clone().try_into()?;
+    let task_dto =
+        task_metrics::build_task_response(&state.pool, project_id, task.clone(), now).await?;
 
     // Log activity with old/new tracking and request context
     let ctx = crate::events::RequestContext::from_headers(&headers);
@@ -442,8 +524,170 @@ pub async fn get_task(
     Path((project_id, id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<Task>> {
     let task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
-    let task: Task = task.try_into()?;
+    let task = task_metrics::build_task_response(&state.pool, project_id, task, utc_now()).await?;
     Ok(Json(task))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project_id}/tasks/{id}/progress-components",
+    tag = "Tasks",
+    params(
+        ("project_id" = Uuid, Path, description = "Project id"),
+        ("id" = Uuid, Path, description = "Task id")
+    ),
+    responses((status = 200, description = "List task progress components", body = [TaskProgressComponent])),
+    security(("bearerAuth" = []))
+)]
+pub async fn list_task_progress_components(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((project_id, id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Vec<TaskProgressComponent>>> {
+    let _ = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let components = task_metrics::load_task_progress_components(&state.pool, id).await?;
+    Ok(Json(components))
+}
+
+#[utoipa::path(
+    put,
+    path = "/projects/{project_id}/tasks/{id}/progress-components",
+    tag = "Tasks",
+    params(
+        ("project_id" = Uuid, Path, description = "Project id"),
+        ("id" = Uuid, Path, description = "Task id")
+    ),
+    request_body = ReplaceTaskProgressComponentsRequest,
+    responses((status = 200, description = "Replace task progress components", body = [TaskProgressComponent])),
+    security(("bearerAuth" = []))
+)]
+pub async fn replace_task_progress_components(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((project_id, id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<ReplaceTaskProgressComponentsRequest>,
+) -> AppResult<Json<Vec<TaskProgressComponent>>> {
+    let task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    if task.progress_method != TaskProgressMethod::WeightedComponents {
+        return Err(AppError::bad_request(
+            "progress-components require progress_method=weighted_components",
+        ));
+    }
+
+    validate_component_payloads(&payload.components)?;
+
+    let mut tx = state.pool.begin().await?;
+    let now = utc_now();
+
+    let existing_ids = sqlx::query(&format!(
+        "SELECT {} FROM task_progress_components WHERE {} AND deleted_at IS NULL",
+        uuid_sql::case_uuid("id"),
+        uuid_sql::match_uuid_clause("task_id")
+    ))
+    .bind(id.to_string())
+    .bind(id.to_string())
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .map(|row| row.try_get::<String, _>("id"))
+    .collect::<Result<HashSet<_>, _>>()?;
+
+    let mut keep_ids = HashSet::new();
+    for (index, component) in payload.components.iter().enumerate() {
+        let component_id = component.id.unwrap_or_else(Uuid::new_v4);
+        let sort_order = component.sort_order.unwrap_or(index as i32);
+        keep_ids.insert(component_id.to_string());
+
+        if existing_ids.contains(&component_id.to_string()) {
+            let sql = format!(
+                "UPDATE task_progress_components
+                 SET name = ?, component_type = ?, weight = ?, completion_pct = ?, planned_at = ?, completed_at = ?, sort_order = ?, updated_at = ?, deleted_at = NULL
+                 WHERE {} AND {}",
+                uuid_sql::match_uuid_clause("id"),
+                uuid_sql::match_uuid_clause("task_id")
+            );
+            sqlx::query(&sql)
+                .bind(component.name.trim())
+                .bind(component.component_type.trim())
+                .bind(component.weight)
+                .bind(component.completion_pct)
+                .bind(component.planned_at)
+                .bind(component.completed_at)
+                .bind(sort_order)
+                .bind(now)
+                .bind(component_id.to_string())
+                .bind(component_id.to_string())
+                .bind(id.to_string())
+                .bind(id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO task_progress_components (id, task_id, name, component_type, weight, completion_pct, planned_at, completed_at, sort_order, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(component_id.to_string())
+            .bind(id.to_string())
+            .bind(component.name.trim())
+            .bind(component.component_type.trim())
+            .bind(component.weight)
+            .bind(component.completion_pct)
+            .bind(component.planned_at)
+            .bind(component.completed_at)
+            .bind(sort_order)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    let rows = sqlx::query(&format!(
+        "SELECT {} FROM task_progress_components WHERE {} AND deleted_at IS NULL",
+        uuid_sql::case_uuid("id"),
+        uuid_sql::match_uuid_clause("task_id")
+    ))
+    .bind(id.to_string())
+    .bind(id.to_string())
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for row in rows {
+        let existing_id: String = row.try_get("id")?;
+        if !keep_ids.contains(&existing_id) {
+            let sql = format!(
+                "UPDATE task_progress_components SET deleted_at = ?, updated_at = ? WHERE {} AND {}",
+                uuid_sql::match_uuid_clause("id"),
+                uuid_sql::match_uuid_clause("task_id")
+            );
+            let existing_id_second = existing_id.clone();
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(now)
+                .bind(existing_id)
+                .bind(existing_id_second)
+                .bind(id.to_string())
+                .bind(id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    let task_touch_sql = format!(
+        "UPDATE tasks SET updated_at = ? WHERE {} AND deleted_at IS NULL",
+        uuid_sql::match_uuid_clause("id")
+    );
+    sqlx::query(&task_touch_sql)
+        .bind(now)
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    task_metrics::refresh_task_snapshot(&state.pool, id).await?;
+    let components = task_metrics::load_task_progress_components(&state.pool, id).await?;
+    Ok(Json(components))
 }
 
 #[utoipa::path(
@@ -917,16 +1161,12 @@ pub async fn batch_update_tasks(
             )));
         }
 
-        // Use manual select to handle TEXT UUIDs
-        let id_case = uuid_sql::case_uuid("t.id");
-        let proj_case = uuid_sql::case_uuid("t.project_id");
-        let assignee_case = uuid_sql::case_uuid("t.assignee");
-        let parent_case = uuid_sql::case_uuid("t.parent_id");
         let match_id = uuid_sql::match_uuid_clause("t.id");
 
         let sql = format!(
-            "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at FROM tasks t WHERE {}",
-            id_case, proj_case, assignee_case, parent_case, match_id
+            "SELECT {} FROM tasks t WHERE {}",
+            task_metrics::task_select_columns("t"),
+            match_id
         );
 
         let row = sqlx::query(&sql)
@@ -955,6 +1195,12 @@ pub async fn batch_update_tasks(
         }
 
         if let Some(p) = update.progress {
+            if current.progress_method == TaskProgressMethod::WeightedComponents {
+                return Err(AppError::bad_request(format!(
+                    "Task {}: progress updates require manual_percent_legacy progress_method",
+                    update.id
+                )));
+            }
             if !(0..=100).contains(&p) {
                 return Err(AppError::bad_request(format!(
                     "Task {}: progress must be between 0 and 100",
@@ -980,6 +1226,12 @@ pub async fn batch_update_tasks(
         let assignee = update.assignee.or(current.assignee);
         let parent_id = update.parent_id.or(current.parent_id);
         let progress = update.progress.unwrap_or(current.progress);
+        let completed_at = managed_completed_at(&status, progress, current.completed_at, now);
+        let completed_at_is_backfilled = managed_completed_at_is_backfilled(
+            current.completed_at,
+            current.completed_at_is_backfilled,
+            completed_at,
+        );
 
         // Convert Option<Uuid> to Option<String> for binding
         let assignee_str = assignee.map(|u| u.to_string());
@@ -987,7 +1239,7 @@ pub async fn batch_update_tasks(
 
         let match_id = uuid_sql::match_uuid_clause("id");
         let update_sql = format!(
-            "UPDATE tasks SET title = ?, description = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, updated_at = ? WHERE {}",
+            "UPDATE tasks SET title = ?, description = ?, status = ?, due_date = ?, start_date = ?, end_date = ?, assignee = ?, parent_id = ?, progress = ?, completed_at = ?, completed_at_is_backfilled = ?, updated_at = ? WHERE {}",
             match_id
         );
 
@@ -1001,6 +1253,8 @@ pub async fn batch_update_tasks(
             .bind(assignee_str)
             .bind(parent_id_str)
             .bind(progress)
+            .bind(completed_at)
+            .bind(completed_at_is_backfilled)
             .bind(now)
             .bind(update.id.to_string())
             .bind(update.id.to_string())
@@ -1017,19 +1271,15 @@ pub async fn batch_update_tasks(
     }
 
     // Use manual column selection to handle TEXT UUIDs
-    let id_case = uuid_sql::case_uuid("t.id");
-    let proj_case = uuid_sql::case_uuid("t.project_id");
-    let assignee_case = uuid_sql::case_uuid("t.assignee");
-    let parent_case = uuid_sql::case_uuid("t.parent_id");
-
     let placeholders = std::iter::repeat_n("?", updated_ids.len())
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
+        "SELECT {} \
          FROM tasks t \
          WHERE t.id IN ({}) ORDER BY t.start_date ASC",
-        id_case, proj_case, assignee_case, parent_case, placeholders
+        task_metrics::task_select_columns("t"),
+        placeholders
     );
 
     let mut query = sqlx::query(&sql);
@@ -1043,31 +1293,10 @@ pub async fn batch_update_tasks(
         tasks_db.push(row_parsers::db_task_from_row(&row)?);
     }
 
-    let tasks: Vec<Task> = tasks_db
-        .into_iter()
-        .map(Task::try_from)
-        .collect::<Result<_, _>>()?;
+    let tasks =
+        task_metrics::build_task_responses(&state.pool, project_id, tasks_db, utc_now()).await?;
 
     Ok(Json(tasks))
-}
-
-fn resolve_sort_column(sort_by: Option<TaskSortBy>) -> AppResult<&'static str> {
-    match sort_by.unwrap_or(TaskSortBy::StartDate) {
-        TaskSortBy::StartDate => Ok("COALESCE(t.start_date, t.created_at)"),
-        TaskSortBy::DueDate => Ok("COALESCE(t.due_date, t.created_at)"),
-        TaskSortBy::CreatedAt => Ok("t.created_at"),
-        TaskSortBy::UpdatedAt => Ok("t.updated_at"),
-        TaskSortBy::Title => Ok("t.title"),
-        TaskSortBy::Status => Ok("t.status"),
-        TaskSortBy::Progress => Ok("t.progress"),
-    }
-}
-
-fn resolve_sort_dir(sort_dir: Option<TaskSortDir>) -> AppResult<&'static str> {
-    match sort_dir.unwrap_or(TaskSortDir::Asc) {
-        TaskSortDir::Asc => Ok("ASC"),
-        TaskSortDir::Desc => Ok("DESC"),
-    }
 }
 
 fn split_csv_values(raw: &str) -> Vec<&str> {
@@ -1075,6 +1304,50 @@ fn split_csv_values(raw: &str) -> Vec<&str> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .collect()
+}
+
+fn normalize_schedule_status_filter(
+    raw: Option<String>,
+) -> AppResult<Option<Vec<TaskScheduleStatus>>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let values = split_csv_values(&raw);
+    if values.is_empty() {
+        return Err(AppError::bad_request("schedule_status must not be empty"));
+    }
+
+    values
+        .into_iter()
+        .map(|value| {
+            value
+                .parse::<TaskScheduleStatus>()
+                .map_err(AppError::bad_request)
+        })
+        .collect::<AppResult<Vec<_>>>()
+        .map(Some)
+}
+
+fn normalize_health_status_filter(raw: Option<String>) -> AppResult<Option<Vec<TaskHealthStatus>>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let values = split_csv_values(&raw);
+    if values.is_empty() {
+        return Err(AppError::bad_request("health_status must not be empty"));
+    }
+
+    values
+        .into_iter()
+        .map(|value| {
+            value
+                .parse::<TaskHealthStatus>()
+                .map_err(AppError::bad_request)
+        })
+        .collect::<AppResult<Vec<_>>>()
+        .map(Some)
 }
 
 fn normalize_search_query(q: Option<String>) -> AppResult<Option<String>> {
@@ -1104,6 +1377,147 @@ fn normalize_create_description(title: &str, description: Option<&str>) -> Strin
     match description.map(str::trim) {
         Some(value) if !value.is_empty() => value.to_string(),
         _ => format!("[Quick Add] {}", title.trim()),
+    }
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn validate_task_weight(task_weight: f64) -> AppResult<f64> {
+    if task_weight <= 0.0 {
+        return Err(AppError::bad_request("task_weight must be greater than 0"));
+    }
+    Ok(task_weight)
+}
+
+fn validate_progress_payload(
+    progress_method: TaskProgressMethod,
+    progress: Option<i32>,
+) -> AppResult<()> {
+    if progress_method == TaskProgressMethod::WeightedComponents && progress.is_some() {
+        return Err(AppError::bad_request(
+            "progress writes require manual_percent_legacy progress_method",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_baseline(
+    baseline_start_at: Option<DateTime<Utc>>,
+    baseline_end_at: Option<DateTime<Utc>>,
+) -> AppResult<()> {
+    if baseline_start_at.is_some() ^ baseline_end_at.is_some() {
+        return Err(AppError::bad_request(
+            "baseline_start_at and baseline_end_at must both be provided",
+        ));
+    }
+    if let (Some(start), Some(end)) = (baseline_start_at, baseline_end_at) {
+        if end <= start {
+            return Err(AppError::bad_request(
+                "baseline_end_at must be greater than baseline_start_at",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_component_payloads(components: &[TaskProgressComponentInput]) -> AppResult<()> {
+    let mut seen_ids = HashSet::new();
+    for (index, component) in components.iter().enumerate() {
+        if let Some(id) = component.id {
+            if !seen_ids.insert(id) {
+                return Err(AppError::bad_request(format!(
+                    "components[{}].id is duplicated",
+                    index
+                )));
+            }
+        }
+        if component.name.trim().is_empty() {
+            return Err(AppError::bad_request(format!(
+                "components[{}].name must not be empty",
+                index
+            )));
+        }
+        if component.component_type.trim().is_empty() {
+            return Err(AppError::bad_request(format!(
+                "components[{}].component_type must not be empty",
+                index
+            )));
+        }
+        if component.weight <= 0.0 {
+            return Err(AppError::bad_request(format!(
+                "components[{}].weight must be greater than 0",
+                index
+            )));
+        }
+        if !(0.0..=100.0).contains(&component.completion_pct) {
+            return Err(AppError::bad_request(format!(
+                "components[{}].completion_pct must be between 0 and 100",
+                index
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn sort_tasks(tasks: &mut [Task], sort_by: TaskSortBy, sort_dir: TaskSortDir) {
+    tasks.sort_by(|left, right| compare_tasks(left, right, sort_by, sort_dir));
+}
+
+fn compare_tasks(
+    left: &Task,
+    right: &Task,
+    sort_by: TaskSortBy,
+    sort_dir: TaskSortDir,
+) -> std::cmp::Ordering {
+    let ordering = match sort_by {
+        TaskSortBy::StartDate => left
+            .start_date
+            .as_ref()
+            .unwrap_or(&left.created_at)
+            .cmp(right.start_date.as_ref().unwrap_or(&right.created_at)),
+        TaskSortBy::DueDate => left
+            .due_date
+            .as_ref()
+            .unwrap_or(&left.created_at)
+            .cmp(right.due_date.as_ref().unwrap_or(&right.created_at)),
+        TaskSortBy::CreatedAt => left.created_at.cmp(&right.created_at),
+        TaskSortBy::UpdatedAt => left.updated_at.cmp(&right.updated_at),
+        TaskSortBy::Title => left.title.cmp(&right.title),
+        TaskSortBy::Status => left.status.cmp(&right.status),
+        TaskSortBy::Progress => left.progress.cmp(&right.progress),
+        TaskSortBy::ExpectedProgressPct => {
+            cmp_option_f64(left.expected_progress_pct, right.expected_progress_pct)
+        }
+        TaskSortBy::ActualProgressPct => {
+            cmp_option_f64(left.actual_progress_pct, right.actual_progress_pct)
+        }
+        TaskSortBy::VariancePct => cmp_option_f64(left.variance_pct, right.variance_pct),
+        TaskSortBy::HealthStatus => left
+            .health_status
+            .rank()
+            .cmp(&right.health_status.rank())
+            .then_with(|| left.title.cmp(&right.title)),
+    };
+
+    match sort_dir {
+        TaskSortDir::Asc => ordering,
+        TaskSortDir::Desc => ordering.reverse(),
+    }
+}
+
+fn cmp_option_f64(left: Option<f64>, right: Option<f64>) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left
+            .partial_cmp(&right)
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
     }
 }
 
@@ -1179,22 +1593,17 @@ async fn fetch_task(
     project_id: Uuid,
     task_id: Uuid,
 ) -> AppResult<DbTask> {
-    let id_case = uuid_sql::case_uuid("t.id");
-    let project_case = uuid_sql::case_uuid("t.project_id");
-    let assignee_case = uuid_sql::case_uuid("t.assignee");
-    let parent_case = uuid_sql::case_uuid("t.parent_id");
-
     let match_task = uuid_sql::match_uuid_clause("t.id");
     let match_proj = uuid_sql::match_uuid_clause("t.project_id");
     let match_owner = uuid_sql::match_uuid_clause("p.user_id");
     let member_match = uuid_sql::match_uuid_clause("pm.user_id");
 
     let sql = format!(
-        "SELECT {} , {} , t.title, t.description, t.status, t.due_date, t.start_date, t.end_date, t.duration_days, {} , {} , t.progress, t.created_at, t.updated_at, t.deleted_at \
+        "SELECT {} \
          FROM tasks t
          INNER JOIN projects p ON p.id = t.project_id
          WHERE {} AND {} AND p.deleted_at IS NULL AND t.deleted_at IS NULL
-           AND (
+          AND (
                {}
                OR EXISTS (
                    SELECT 1
@@ -1204,7 +1613,11 @@ async fn fetch_task(
                      AND pm.deleted_at IS NULL
                )
            )",
-        id_case, project_case, assignee_case, parent_case, match_task, match_proj, match_owner, member_match
+        task_metrics::task_select_columns("t"),
+        match_task,
+        match_proj,
+        match_owner,
+        member_match
     );
 
     let row = sqlx::query(&sql)

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::db::{row_parsers, uuid_sql};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -20,6 +22,11 @@ use crate::models::s_curve::{
     PortfolioSCurveProjectSummary, PortfolioSCurveSummaryResponse, Rule5070Status,
     SCurveDataStatus, SCurveHealthResponse, SCurveMetric, SCurveStage,
 };
+use crate::models::task::{Task, TaskScheduleStatus};
+use crate::models::task_health::{
+    TaskHealthRule, TaskHealthRuleInput, TaskHealthRuleSetResponse, UpdateTaskHealthRulesRequest,
+};
+use crate::task_metrics;
 use crate::utils::utc_now;
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -401,6 +408,22 @@ pub struct DashboardMetricPoint {
     pub value: f64,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskStatusCounts {
+    pub total: i64,
+    pub finished_early: i64,
+    pub overdue: i64,
+    pub on_time: i64,
+    pub not_specified: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WorkloadDistributionItem {
+    pub user_id: Uuid,
+    pub user_name: String,
+    pub task_count: i64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DashboardQuery {
     pub metric: Option<SCurveMetric>,
@@ -411,6 +434,11 @@ pub struct DashboardResponse {
     pub project: Project,
     pub plan: Vec<ProjectPlanPoint>,
     pub actual: Vec<ActualPoint>,
+    pub overall_progress_pct: f64,
+    pub task_status_counts: TaskStatusCounts,
+    pub workload_distribution: Vec<WorkloadDistributionItem>,
+    pub assignment_coverage_pct: f64,
+    pub due_date_coverage_pct: f64,
     pub metric: SCurveMetric,
     pub metric_supported: bool,
     pub data_status: SCurveDataStatus,
@@ -456,12 +484,14 @@ pub async fn get_project_dashboard(
 
     let metric_plan = fetch_dashboard_metric_plan_series(&state.pool, id, metric).await?;
     let metric_actual = fetch_dashboard_metric_actual_series(&state.pool, id, metric).await?;
+    let summary = fetch_dashboard_task_summary(&state.pool, id).await?;
     let data_status = if metric_plan.is_empty() || metric_actual.is_empty() {
         SCurveDataStatus::InsufficientData
     } else {
         SCurveDataStatus::Ok
     };
-    let (planned_source, actual_source, unit) = metric_series_metadata(metric);
+    let (planned_source, actual_source, unit) =
+        dashboard_metric_metadata(&state.pool, id, metric).await?;
     let currency = match metric {
         SCurveMetric::Cost => Some(resolve_cost_currency(&state.pool, id).await?),
         _ => None,
@@ -471,18 +501,189 @@ pub async fn get_project_dashboard(
         project,
         plan,
         actual,
+        overall_progress_pct: summary.overall_progress_pct,
+        task_status_counts: summary.task_status_counts,
+        workload_distribution: summary.workload_distribution,
+        assignment_coverage_pct: summary.assignment_coverage_pct,
+        due_date_coverage_pct: summary.due_date_coverage_pct,
         metric,
         metric_supported: true,
         data_status,
-        planned_source: Some(planned_source.to_string()),
-        actual_source: Some(actual_source.to_string()),
-        unit: Some(unit.to_string()),
+        planned_source: Some(planned_source),
+        actual_source: Some(actual_source),
+        unit: Some(unit),
         currency,
         metric_plan,
         metric_actual,
     };
 
     Ok(Json(resp))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project_id}/task-health/rules",
+    tag = "Projects",
+    params(("project_id" = Uuid, Path, description = "Project id")),
+    responses((status = 200, description = "Effective task health rules", body = TaskHealthRuleSetResponse)),
+    security(("bearerAuth" = []))
+)]
+pub async fn get_task_health_rules(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+) -> AppResult<Json<TaskHealthRuleSetResponse>> {
+    let _ = fetch_project(&state.pool, auth.user_id, project_id).await?;
+    let rule_set = task_metrics::load_effective_task_health_rules(&state.pool, project_id).await?;
+    Ok(Json(to_task_health_rule_set_response(rule_set)))
+}
+
+#[utoipa::path(
+    put,
+    path = "/projects/{project_id}/task-health/rules",
+    tag = "Projects",
+    params(("project_id" = Uuid, Path, description = "Project id")),
+    request_body = UpdateTaskHealthRulesRequest,
+    responses((status = 200, description = "Project-specific task health rules saved", body = TaskHealthRuleSetResponse)),
+    security(("bearerAuth" = []))
+)]
+pub async fn update_task_health_rules(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+    Json(payload): Json<UpdateTaskHealthRulesRequest>,
+) -> AppResult<Json<TaskHealthRuleSetResponse>> {
+    let _ = fetch_project(&state.pool, auth.user_id, project_id).await?;
+    validate_task_health_rules(&payload.rules)?;
+
+    let now = utc_now();
+    let mut tx = state.pool.begin().await?;
+    let project_match = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "SELECT id
+         FROM task_health_rule_sets
+         WHERE scope = 'project'
+           AND {} AND is_active = 1 AND deleted_at IS NULL
+         ORDER BY datetime(updated_at) DESC
+         LIMIT 1",
+        project_match
+    );
+    let existing_rule_set_id: Option<String> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        .flatten();
+
+    let rule_set_id = existing_rule_set_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    if existing_rule_set_id.is_some() {
+        sqlx::query("UPDATE task_health_rule_sets SET updated_at = ?, is_active = 1, deleted_at = NULL WHERE id = ?")
+            .bind(now)
+            .bind(&rule_set_id)
+            .execute(&mut *tx)
+            .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO task_health_rule_sets (id, scope, project_id, is_active, created_at, updated_at)
+             VALUES (?, 'project', ?, 1, ?, ?)",
+        )
+        .bind(&rule_set_id)
+        .bind(project_id.to_string())
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    sqlx::query("UPDATE task_health_rules SET deleted_at = ?, updated_at = ? WHERE rule_set_id = ? AND deleted_at IS NULL")
+        .bind(now)
+        .bind(now)
+        .bind(&rule_set_id)
+        .execute(&mut *tx)
+        .await?;
+
+    for (index, rule) in payload.rules.into_iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO task_health_rules (id, rule_set_id, health_status, variance_from, variance_to, priority, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&rule_set_id)
+        .bind(rule.health_status.as_str())
+        .bind(rule.variance_from)
+        .bind(rule.variance_to)
+        .bind((index as i32) + 1)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    let rule_set = task_metrics::load_effective_task_health_rules(&state.pool, project_id).await?;
+    Ok(Json(to_task_health_rule_set_response(rule_set)))
+}
+
+#[derive(Debug)]
+struct DashboardTaskSummary {
+    overall_progress_pct: f64,
+    task_status_counts: TaskStatusCounts,
+    workload_distribution: Vec<WorkloadDistributionItem>,
+    assignment_coverage_pct: f64,
+    due_date_coverage_pct: f64,
+}
+
+fn to_task_health_rule_set_response(
+    rule_set: crate::models::task_health::EffectiveTaskHealthRuleSet,
+) -> TaskHealthRuleSetResponse {
+    TaskHealthRuleSetResponse {
+        scope: rule_set.scope,
+        project_id: rule_set.project_id,
+        rules: rule_set
+            .rules
+            .into_iter()
+            .map(|rule| TaskHealthRule {
+                health_status: rule.health_status,
+                variance_from: rule.variance_from,
+                variance_to: rule.variance_to,
+                priority: rule.priority,
+            })
+            .collect(),
+        updated_at: rule_set.updated_at,
+    }
+}
+
+fn validate_task_health_rules(rules: &[TaskHealthRuleInput]) -> AppResult<()> {
+    if rules.is_empty() {
+        return Err(AppError::bad_request("rules must not be empty"));
+    }
+
+    let mut seen = HashMap::new();
+    for (index, rule) in rules.iter().enumerate() {
+        if rule.health_status.as_str() == "needs_plan" {
+            return Err(AppError::bad_request(
+                "needs_plan is derived automatically and cannot be configured",
+            ));
+        }
+        if let (Some(from), Some(to)) = (rule.variance_from, rule.variance_to) {
+            if from >= to {
+                return Err(AppError::bad_request(format!(
+                    "rules[{}] variance_from must be less than variance_to",
+                    index
+                )));
+            }
+        }
+        if seen.insert(rule.health_status.as_str(), index).is_some() {
+            return Err(AppError::bad_request(format!(
+                "health_status '{}' is duplicated",
+                rule.health_status.as_str()
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 async fn fetch_progress_dashboard_plan(
@@ -563,13 +764,31 @@ async fn fetch_dashboard_metric_plan_series(
         .fetch_all(pool)
         .await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(date, value)| DashboardMetricPoint {
-            date,
-            value: round2(value),
-        })
-        .collect())
+    if !rows.is_empty() {
+        return Ok(rows
+            .into_iter()
+            .map(|(date, value)| DashboardMetricPoint {
+                date,
+                value: round2(value),
+            })
+            .collect());
+    }
+
+    if metric == SCurveMetric::Progress {
+        return Ok(
+            compute_weighted_task_expected_progress_pct(pool, project_id)
+                .await?
+                .map(|value| {
+                    vec![DashboardMetricPoint {
+                        date: Utc::now().date_naive().to_string(),
+                        value: round2(value),
+                    }]
+                })
+                .unwrap_or_default(),
+        );
+    }
+
+    Ok(Vec::new())
 }
 
 async fn fetch_dashboard_metric_actual_series(
@@ -592,13 +811,25 @@ async fn fetch_dashboard_metric_actual_series(
                 .bind(project_id.to_string())
                 .fetch_all(pool)
                 .await?;
-            Ok(rows
-                .into_iter()
-                .map(|(date, value)| DashboardMetricPoint {
-                    date,
-                    value: round2(value),
+            if !rows.is_empty() {
+                return Ok(rows
+                    .into_iter()
+                    .map(|(date, value)| DashboardMetricPoint {
+                        date,
+                        value: round2(value),
+                    })
+                    .collect());
+            }
+
+            let current = compute_weighted_task_actual_progress_pct(pool, project_id).await?;
+            Ok(current
+                .map(|value| {
+                    vec![DashboardMetricPoint {
+                        date: Utc::now().date_naive().to_string(),
+                        value: round2(value),
+                    }]
                 })
-                .collect())
+                .unwrap_or_default())
         }
         SCurveMetric::Hours | SCurveMetric::Cost => {
             let column = if metric == SCurveMetric::Hours {
@@ -634,23 +865,179 @@ async fn fetch_dashboard_metric_actual_series(
     }
 }
 
-fn metric_series_metadata(metric: SCurveMetric) -> (&'static str, &'static str, &'static str) {
+async fn load_project_tasks_with_metrics(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Vec<Task>> {
+    let match_proj = uuid_sql::match_uuid_clause("t.project_id");
+    let sql = format!(
+        "SELECT {}
+         FROM tasks t
+         WHERE {} AND t.deleted_at IS NULL",
+        task_metrics::task_select_columns("t"),
+        match_proj
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(pool)
+        .await?;
+
+    let mut tasks = Vec::with_capacity(rows.len());
+    for row in rows {
+        tasks.push(row_parsers::db_task_from_row(&row)?);
+    }
+
+    task_metrics::build_task_responses(pool, project_id, tasks, Utc::now()).await
+}
+
+async fn fetch_dashboard_task_summary(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<DashboardTaskSummary> {
+    let tasks = load_project_tasks_with_metrics(pool, project_id).await?;
+    let total = tasks.len() as i64;
+    let mut assigned_count = 0_i64;
+    let mut due_count = 0_i64;
+    let mut task_status_counts = TaskStatusCounts {
+        total,
+        finished_early: 0,
+        overdue: 0,
+        on_time: 0,
+        not_specified: 0,
+    };
+
+    for task in &tasks {
+        if task.assignee.is_some() {
+            assigned_count += 1;
+        }
+        if task.due_date.is_some() {
+            due_count += 1;
+        }
+
+        match task.schedule_status {
+            TaskScheduleStatus::FinishedEarly => task_status_counts.finished_early += 1,
+            TaskScheduleStatus::Overdue => task_status_counts.overdue += 1,
+            TaskScheduleStatus::OnTime => task_status_counts.on_time += 1,
+            TaskScheduleStatus::NotSpecified => task_status_counts.not_specified += 1,
+        }
+    }
+
+    let workload_distribution = fetch_dashboard_workload_distribution(pool, project_id).await?;
+    let overall_progress_pct = compute_weighted_progress_from_tasks(&tasks).unwrap_or(0.0);
+    let assignment_coverage_pct = if total == 0 {
+        0.0
+    } else {
+        round2((assigned_count as f64 / total as f64) * 100.0)
+    };
+    let due_date_coverage_pct = if total == 0 {
+        0.0
+    } else {
+        round2((due_count as f64 / total as f64) * 100.0)
+    };
+
+    Ok(DashboardTaskSummary {
+        overall_progress_pct,
+        task_status_counts,
+        workload_distribution,
+        assignment_coverage_pct,
+        due_date_coverage_pct,
+    })
+}
+
+async fn fetch_dashboard_workload_distribution(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Vec<WorkloadDistributionItem>> {
+    let member_user_case = uuid_sql::expr_uuid("pm.user_id");
+    let project_member_match = uuid_sql::match_uuid_clause("pm.project_id");
+    let user_case = uuid_sql::expr_uuid("u.id");
+    let members_sql = format!(
+        "SELECT DISTINCT
+            {member_user_case} AS user_id,
+            COALESCE(u.name, 'Unknown') AS user_name
+         FROM project_members pm
+         LEFT JOIN users u ON {user_case} = {member_user_case}
+         WHERE {project_member_match} AND pm.deleted_at IS NULL",
+    );
+    let member_rows = sqlx::query(&members_sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(pool)
+        .await?;
+
+    let task_project_match = uuid_sql::match_uuid_clause("t.project_id");
+    let assignee_case = uuid_sql::expr_uuid("t.assignee");
+    let task_counts_sql = format!(
+        "SELECT
+            {assignee_case} AS user_id,
+            COUNT(*) AS task_count
+         FROM tasks t
+         WHERE {task_project_match} AND t.deleted_at IS NULL AND t.assignee IS NOT NULL
+         GROUP BY {assignee_case}",
+    );
+    let task_count_rows = sqlx::query(&task_counts_sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_all(pool)
+        .await?;
+
+    let mut task_counts = HashMap::with_capacity(task_count_rows.len());
+    for row in task_count_rows {
+        let user_id: String = row.try_get("user_id")?;
+        let task_count: i64 = row.try_get("task_count")?;
+        task_counts.insert(user_id, task_count);
+    }
+
+    let mut items = Vec::with_capacity(member_rows.len());
+    for row in member_rows {
+        let user_id_s: String = row.try_get("user_id")?;
+        let user_name: String = row.try_get("user_name")?;
+        let task_count = *task_counts.get(&user_id_s).unwrap_or(&0);
+        items.push(WorkloadDistributionItem {
+            user_id: Uuid::parse_str(&user_id_s)
+                .map_err(|e| AppError::internal(format!("invalid workload user id: {}", e)))?,
+            user_name,
+            task_count,
+        });
+    }
+
+    items.sort_by(|left, right| {
+        right
+            .task_count
+            .cmp(&left.task_count)
+            .then_with(|| left.user_name.cmp(&right.user_name))
+    });
+
+    Ok(items)
+}
+
+async fn dashboard_metric_metadata(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    metric: SCurveMetric,
+) -> AppResult<(String, String, String)> {
     match metric {
-        SCurveMetric::Progress => (
-            "project_plan.planned_progress",
-            "task_progress.progress (avg)",
-            "percent",
-        ),
-        SCurveMetric::Hours => (
-            "project_plan.planned_hours (cumulative)",
-            "work_logs.hours (sum, cumulative by day)",
-            "hours",
-        ),
-        SCurveMetric::Cost => (
-            "project_plan.planned_cost (cumulative)",
-            "work_logs.cost_amount (sum, cumulative by day)",
-            "currency",
-        ),
+        SCurveMetric::Progress => {
+            let (_, planned_source) = compute_planned_progress_pct(pool, project_id).await?;
+            let (_, actual_source) = compute_actual_progress_pct(pool, project_id).await?;
+            Ok((
+                planned_source,
+                actual_source.to_string(),
+                "percent".to_string(),
+            ))
+        }
+        SCurveMetric::Hours => Ok((
+            "project_plan.planned_hours (cumulative)".to_string(),
+            "work_logs.hours (sum, cumulative by day)".to_string(),
+            "hours".to_string(),
+        )),
+        SCurveMetric::Cost => Ok((
+            "project_plan.planned_cost (cumulative)".to_string(),
+            "work_logs.cost_amount (sum, cumulative by day)".to_string(),
+            "currency".to_string(),
+        )),
     }
 }
 
@@ -1861,7 +2248,7 @@ async fn compute_elapsed_time_pct(pool: &SqlitePool, project_id: Uuid) -> AppRes
 async fn compute_planned_progress_pct(
     pool: &SqlitePool,
     project_id: Uuid,
-) -> AppResult<Option<f64>> {
+) -> AppResult<(Option<f64>, String)> {
     let match_proj = uuid_sql::match_uuid_clause("project_id");
     let sql = format!(
         "SELECT CAST(planned_progress AS REAL)
@@ -1880,26 +2267,26 @@ async fn compute_planned_progress_pct(
         .fetch_optional(pool)
         .await?
         .flatten();
-    Ok(value)
+    if value.is_some() {
+        return Ok((value, "project_plan.planned_progress".to_string()));
+    }
+
+    Ok((
+        compute_weighted_task_expected_progress_pct(pool, project_id).await?,
+        "tasks.expected_progress_pct (weighted rollup)".to_string(),
+    ))
 }
 
 async fn compute_actual_progress_pct(
     pool: &SqlitePool,
     project_id: Uuid,
 ) -> AppResult<(Option<f64>, &'static str)> {
-    let match_proj_tasks = uuid_sql::match_uuid_clause("project_id");
-    let sql_tasks = format!(
-        "SELECT AVG(CAST(progress AS REAL)) FROM tasks WHERE {} AND deleted_at IS NULL",
-        match_proj_tasks
-    );
-    let tasks_avg: Option<f64> = sqlx::query_scalar(&sql_tasks)
-        .bind(project_id.to_string())
-        .bind(project_id.to_string())
-        .fetch_one(pool)
-        .await?;
-
-    if tasks_avg.is_some() {
-        return Ok((tasks_avg, "tasks.progress (avg)"));
+    let weighted_actual = compute_weighted_task_actual_progress_pct(pool, project_id).await?;
+    if weighted_actual.is_some() {
+        return Ok((
+            weighted_actual,
+            "tasks.actual_progress_pct (weighted rollup)",
+        ));
     }
 
     let match_proj_progress = uuid_sql::match_uuid_clause("project_id");
@@ -1913,6 +2300,28 @@ async fn compute_actual_progress_pct(
         .fetch_one(pool)
         .await?;
     Ok((progress_avg, "task_progress.progress (avg)"))
+}
+
+async fn compute_weighted_task_actual_progress_pct(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Option<f64>> {
+    let tasks = load_project_tasks_with_metrics(pool, project_id).await?;
+    Ok(weighted_rollup(tasks.iter().filter_map(|task| {
+        task.actual_progress_pct
+            .map(|actual| (task.task_weight, actual))
+    })))
+}
+
+async fn compute_weighted_task_expected_progress_pct(
+    pool: &SqlitePool,
+    project_id: Uuid,
+) -> AppResult<Option<f64>> {
+    let tasks = load_project_tasks_with_metrics(pool, project_id).await?;
+    Ok(weighted_rollup(tasks.iter().filter_map(|task| {
+        task.expected_progress_pct
+            .map(|expected| (task.task_weight, expected))
+    })))
 }
 
 struct MetricValues {
@@ -1931,12 +2340,13 @@ async fn compute_metric_values(
 ) -> AppResult<MetricValues> {
     match metric {
         SCurveMetric::Progress => {
-            let planned_pct = compute_planned_progress_pct(pool, project_id).await?;
+            let (planned_pct, planned_source) =
+                compute_planned_progress_pct(pool, project_id).await?;
             let (actual_pct, actual_source) = compute_actual_progress_pct(pool, project_id).await?;
             Ok(MetricValues {
                 planned_pct,
                 actual_pct,
-                planned_source: "project_plan.planned_progress".to_string(),
+                planned_source,
                 actual_source: actual_source.to_string(),
                 unit: "percent".to_string(),
                 currency: None,
@@ -2065,6 +2475,9 @@ async fn compute_last_updated_at(pool: &SqlitePool, project_id: Uuid) -> AppResu
     let progress_match = uuid_sql::match_uuid_clause("project_id");
     let work_log_match = uuid_sql::match_uuid_clause("project_id");
     let plan_match = uuid_sql::match_uuid_clause("project_id");
+    let component_task_match = uuid_sql::match_uuid_clause("t.project_id");
+    let task_rule_set_project_match = uuid_sql::match_uuid_clause("project_id");
+    let task_rule_join_project_match = uuid_sql::match_uuid_clause("ths.project_id");
     let sql = format!(
         "SELECT MAX(ts) FROM (
             SELECT updated_at AS ts FROM projects WHERE {}
@@ -2073,13 +2486,38 @@ async fn compute_last_updated_at(pool: &SqlitePool, project_id: Uuid) -> AppResu
             UNION ALL
             SELECT updated_at AS ts FROM task_progress WHERE {} AND deleted_at IS NULL
             UNION ALL
+            SELECT c.updated_at AS ts
+            FROM task_progress_components c
+            INNER JOIN tasks t ON t.id = c.task_id
+            WHERE {} AND c.deleted_at IS NULL AND t.deleted_at IS NULL
+            UNION ALL
             SELECT updated_at AS ts FROM work_logs WHERE {} AND deleted_at IS NULL
             UNION ALL
             SELECT updated_at AS ts FROM project_plan WHERE {}
+            UNION ALL
+            SELECT updated_at AS ts FROM task_health_rule_sets WHERE {} AND deleted_at IS NULL
+            UNION ALL
+            SELECT thr.updated_at AS ts
+            FROM task_health_rules thr
+            INNER JOIN task_health_rule_sets ths ON ths.id = thr.rule_set_id
+            WHERE {} AND ths.deleted_at IS NULL AND thr.deleted_at IS NULL
         )",
-        project_match, task_match, progress_match, work_log_match, plan_match
+        project_match,
+        task_match,
+        progress_match,
+        component_task_match,
+        work_log_match,
+        plan_match,
+        task_rule_set_project_match,
+        task_rule_join_project_match
     );
     let value: Option<String> = sqlx::query_scalar(&sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
         .bind(project_id.to_string())
@@ -2300,6 +2738,33 @@ where
         None
     } else {
         Some(round2(values.iter().sum::<f64>() / values.len() as f64))
+    }
+}
+
+fn compute_weighted_progress_from_tasks(tasks: &[Task]) -> Option<f64> {
+    weighted_rollup(tasks.iter().filter_map(|task| {
+        task.actual_progress_pct
+            .map(|actual| (task.task_weight, actual))
+    }))
+}
+
+fn weighted_rollup<I>(iter: I) -> Option<f64>
+where
+    I: Iterator<Item = (f64, f64)>,
+{
+    let mut weighted_sum = 0.0_f64;
+    let mut total_weight = 0.0_f64;
+    for (weight, value) in iter {
+        if weight <= 0.0 {
+            continue;
+        }
+        weighted_sum += weight * value;
+        total_weight += weight;
+    }
+    if total_weight <= 0.0 {
+        None
+    } else {
+        Some(round2(weighted_sum / total_weight))
     }
 }
 

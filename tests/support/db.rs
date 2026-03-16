@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,8 +14,11 @@ const MUTABLE_TABLES: &[&str] = &[
     "stale_noise_logs",
     "telemetry_events",
     "task_progress",
+    "task_progress_components",
     "task_dependencies",
     "tasks",
+    "task_health_rules",
+    "task_health_rule_sets",
     "project_plan",
     "project_members",
     "project_member_resource_roles",
@@ -57,7 +61,25 @@ pub async fn cloned_clean_db() -> Result<TestDb> {
         .filename(&db_path)
         .create_if_missing(false)
         .foreign_keys(false);
-    let pool = SqlitePool::connect_with(opts).await?;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .min_connections(1)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("PRAGMA busy_timeout = 5000")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("PRAGMA journal_mode = WAL")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("PRAGMA synchronous = NORMAL")
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect_with(opts)
+        .await?;
 
     sqlx::migrate!()
         .run(&pool)

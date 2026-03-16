@@ -1,0 +1,6 @@
+[2m2026-03-16T03:19:47.795029Z[0m [32m INFO[0m Activity listener started
+[2m2026-03-16T03:19:47.899368Z[0m [32m INFO[0m Loaded route permission mappings from database [3mcount[0m[2m=[0m70
+[2m2026-03-16T03:19:47.937217Z[0m [32m INFO[0m listening on 0.0.0.0:8800
+[2m2026-03-16T03:19:47.941044Z[0m [32m INFO[0m starting TLS with cert=/apps/certs/cert.pem key=/apps/certs/key.pem
+[2m2026-03-16T03:20:01.152290Z[0m [33m WARN[0m Permission denied [3muser_id[0m[2m=[0m7d66ae07-f90d-4df8-96df-11ff5f2cb8c6 [3mpermission[0m[2m=[0mproject.create [3mpath[0m[2m=[0m/projects [3mmethod[0m[2m=[0mPOST [3mmode[0m[2m=[0mAdvisory
+[2m2026-03-16T03:20:57.995448Z[0m [33m WARN[0m Permission denied [3muser_id[0m[2m=[0m66d42449-7461-4773-9524-f970aa3657ed [3mpermission[0m[2m=[0mproject.create [3mpath[0m[2m=[0m/projects [3mmethod[0m[2m=[0mPOST [3mmode[0m[2m=[0mAdvisory

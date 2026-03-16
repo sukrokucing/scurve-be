@@ -10,6 +10,8 @@ use crate::app::AppState;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::progress::{Progress, ProgressCreateRequest, ProgressUpdateRequest};
+use crate::models::task::TaskProgressMethod;
+use crate::task_metrics;
 use crate::utils::utc_now;
 
 #[utoipa::path(
@@ -254,6 +256,7 @@ pub async fn create_progress(
     Json(payload): Json<ProgressCreateRequest>,
 ) -> AppResult<(StatusCode, Json<Progress>)> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
+    ensure_manual_progress_task(&state.pool, task_id).await?;
 
     if payload.progress < 0 || payload.progress > 100 {
         return Err(AppError::bad_request("progress must be between 0 and 100"));
@@ -282,6 +285,8 @@ pub async fn create_progress(
         .bind(now)
         .execute(&state.pool)
         .await?;
+
+    task_metrics::refresh_task_snapshot(&state.pool, task_id).await?;
 
     let id_case = uuid_sql::case_uuid("id");
     let project_case = uuid_sql::case_uuid("project_id");
@@ -321,6 +326,7 @@ pub async fn update_progress(
     Json(payload): Json<ProgressUpdateRequest>,
 ) -> AppResult<Json<Progress>> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
+    ensure_manual_progress_task(&state.pool, task_id).await?;
 
     let id_case = uuid_sql::case_uuid("id");
     let project_case = uuid_sql::case_uuid("project_id");
@@ -366,6 +372,8 @@ pub async fn update_progress(
         .execute(&state.pool)
         .await?;
 
+    task_metrics::refresh_task_snapshot(&state.pool, task_id).await?;
+
     row.updated_at = now;
     let item: Progress = row.try_into()?;
     Ok(Json(item))
@@ -385,6 +393,7 @@ pub async fn delete_progress(
     auth: AuthUser,
 ) -> AppResult<StatusCode> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
+    ensure_manual_progress_task(&state.pool, task_id).await?;
 
     let now = utc_now();
     let match_id = uuid_sql::match_uuid_clause("id");
@@ -404,6 +413,8 @@ pub async fn delete_progress(
     if affected.rows_affected() == 0 {
         return Err(AppError::not_found("progress entry not found"));
     }
+
+    task_metrics::refresh_task_snapshot(&state.pool, task_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -530,5 +541,31 @@ async fn ensure_task_belongs_to_user_by_task_id(
         .await?;
 
     let _owner = owner_s.ok_or_else(|| AppError::not_found("task not found"))?;
+    Ok(())
+}
+
+async fn ensure_manual_progress_task(pool: &SqlitePool, task_id: Uuid) -> AppResult<()> {
+    let task_match = uuid_sql::match_uuid_clause("id");
+    let sql = format!(
+        "SELECT progress_method
+         FROM tasks
+         WHERE {} AND deleted_at IS NULL",
+        task_match
+    );
+    let progress_method: Option<String> = sqlx::query_scalar(&sql)
+        .bind(task_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_optional(pool)
+        .await?;
+
+    let progress_method = progress_method.ok_or_else(|| AppError::not_found("task not found"))?;
+    let progress_method = progress_method
+        .parse::<TaskProgressMethod>()
+        .map_err(AppError::internal)?;
+    if progress_method != TaskProgressMethod::ManualPercentLegacy {
+        return Err(AppError::bad_request(
+            "progress writes require manual_percent_legacy progress_method",
+        ));
+    }
     Ok(())
 }

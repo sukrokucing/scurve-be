@@ -10,6 +10,7 @@ mod events;
 mod jwt;
 mod models;
 mod routes;
+mod task_metrics;
 mod utils;
 
 #[tokio::main]

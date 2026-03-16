@@ -5,28 +5,30 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 use crate::models::{
-    dependency::DbTaskDependency, progress::DbProgress, project::DbProject,
-    project_plan::DbProjectPlanPoint, task::DbTask, user::DbUser,
+    dependency::DbTaskDependency,
+    progress::DbProgress,
+    project::DbProject,
+    project_plan::DbProjectPlanPoint,
+    task::{DbTask, TaskProgressMethod},
+    task_progress_component::DbTaskProgressComponent,
+    user::DbUser,
 };
 
 fn is_missing_column(err: &sqlx::Error, col: &str) -> bool {
     matches!(err, sqlx::Error::ColumnNotFound(name) if name == col)
 }
 
-fn parse_datetime(s: &str) -> Result<DateTime<Utc>, AppError> {
+pub fn parse_datetime_value(s: &str) -> Result<DateTime<Utc>, AppError> {
     let s = s.trim();
 
-    // Try RFC3339 first (e.g. 2025-11-19T12:34:56Z)
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Ok(dt.with_timezone(&Utc));
     }
 
-    // Try SQLite default timestamp format: "YYYY-MM-DD HH:MM:SS" (with optional fractional seconds)
     if let Ok(naive) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
         return Ok(Utc.from_utc_datetime(&naive));
     }
 
-    // Try date-only format: "YYYY-MM-DD"
     if let Ok(naive_date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         let ndt = naive_date
             .and_hms_opt(0, 0, 0)
@@ -34,8 +36,6 @@ fn parse_datetime(s: &str) -> Result<DateTime<Utc>, AppError> {
         return Ok(Utc.from_utc_datetime(&ndt));
     }
 
-    // Try unix epoch values represented as plain numbers.
-    // Supports seconds and milliseconds.
     if let Ok(epoch) = s.parse::<i64>() {
         let (secs, nanos) = if epoch.abs() >= 1_000_000_000_000 {
             let secs = epoch.div_euclid(1_000);
@@ -59,7 +59,7 @@ fn parse_opt_datetime(s: Option<String>) -> Result<Option<DateTime<Utc>>, AppErr
             if trimmed.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(parse_datetime(trimmed)?))
+                Ok(Some(parse_datetime_value(trimmed)?))
             }
         }
         None => Ok(None),
@@ -185,10 +185,10 @@ pub fn db_progress_from_row(row: &SqliteRow) -> Result<DbProgress, AppError> {
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
     let task_id = Uuid::parse_str(&task_id_s)
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let created_at = parse_datetime(&created_at_s)?;
-    let updated_at = parse_datetime(&updated_at_s)?;
+    let created_at = parse_datetime_value(&created_at_s)?;
+    let updated_at = parse_datetime_value(&updated_at_s)?;
     let deleted_at = if let Some(s) = deleted_at_s {
-        Some(parse_datetime(&s)?)
+        Some(parse_datetime_value(&s)?)
     } else {
         None
     };
@@ -206,78 +206,45 @@ pub fn db_progress_from_row(row: &SqliteRow) -> Result<DbProgress, AppError> {
 }
 
 pub fn db_task_from_row(row: &SqliteRow) -> Result<DbTask, AppError> {
-    let id_s: String = row
-        .try_get("id")
-        .map_err(|e| AppError::internal(format!("missing id: {}", e)))?;
-    let project_id_s: String = row
-        .try_get("project_id")
-        .map_err(|e| AppError::internal(format!("missing project_id: {}", e)))?;
-    let title: String = row
-        .try_get("title")
-        .map_err(|e| AppError::internal(format!("missing title: {}", e)))?;
-    let description: String = row
-        .try_get("description")
-        .map_err(|e| AppError::internal(format!("missing description: {}", e)))?;
-    let status: String = row
-        .try_get("status")
-        .map_err(|e| AppError::internal(format!("missing status: {}", e)))?;
-    let due_date_s: Option<String> = row
-        .try_get("due_date")
-        .map_err(|e| AppError::internal(format!("missing due_date: {}", e)))?;
-    let start_date_s: Option<String> = row
-        .try_get("start_date")
-        .map_err(|e| AppError::internal(format!("missing start_date: {}", e)))?;
-    let end_date_s: Option<String> = row
-        .try_get("end_date")
-        .map_err(|e| AppError::internal(format!("missing end_date: {}", e)))?;
+    let id = Uuid::parse_str(&get_required_text(row, "id")?)
+        .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+    let project_id = Uuid::parse_str(&get_required_text(row, "project_id")?)
+        .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+    let title = get_required_text(row, "title")?;
+    let description = get_required_text(row, "description")?;
+    let status = get_required_text(row, "status")?;
+    let progress_method = get_optional_text(row, "progress_method")?
+        .unwrap_or_else(|| "manual_percent_legacy".to_string())
+        .parse::<TaskProgressMethod>()
+        .map_err(AppError::internal)?;
+    let blocked_flag = row.try_get::<i64, _>("blocked_flag").unwrap_or(0) != 0;
+    let blocked_reason = get_optional_text(row, "blocked_reason")?;
+    let baseline_start_at = parse_opt_datetime(get_optional_text(row, "baseline_start_at")?)?;
+    let baseline_end_at = parse_opt_datetime(get_optional_text(row, "baseline_end_at")?)?;
+    let task_weight = get_optional_f64(row, "task_weight")?.unwrap_or(1.0);
+    let due_date = parse_opt_datetime(get_optional_text(row, "due_date")?)?;
+    let start_date = parse_opt_datetime(get_optional_text(row, "start_date")?)?;
+    let end_date = parse_opt_datetime(get_optional_text(row, "end_date")?)?;
     let duration_days: Option<i32> = row
         .try_get("duration_days")
         .map_err(|e| AppError::internal(format!("missing duration_days: {}", e)))?;
-    let assignee_s: Option<String> = row
-        .try_get("assignee")
-        .map_err(|e| AppError::internal(format!("missing assignee: {}", e)))?;
-    let parent_id_s: Option<String> = row
-        .try_get("parent_id")
-        .map_err(|e| AppError::internal(format!("missing parent_id: {}", e)))?;
-    let progress: i32 = row
-        .try_get("progress")
-        .map_err(|e| AppError::internal(format!("missing progress: {}", e)))?;
-    let created_at_s: String = row
-        .try_get("created_at")
-        .map_err(|e| AppError::internal(format!("missing created_at: {}", e)))?;
-    let updated_at_s: String = row
-        .try_get("updated_at")
-        .map_err(|e| AppError::internal(format!("missing updated_at: {}", e)))?;
-    let deleted_at_s: Option<String> = row
-        .try_get("deleted_at")
-        .map_err(|e| AppError::internal(format!("missing deleted_at: {}", e)))?;
-
-    let id =
-        Uuid::parse_str(&id_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let project_id = Uuid::parse_str(&project_id_s)
+    let assignee = get_optional_text(row, "assignee")?
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let due_date = parse_opt_datetime(due_date_s)?;
-    let start_date = parse_opt_datetime(start_date_s)?;
-    let end_date = parse_opt_datetime(end_date_s)?;
-    let assignee = match assignee_s {
-        Some(s) => Some(
-            Uuid::parse_str(&s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?,
-        ),
-        None => None,
-    };
-    let parent_id = match parent_id_s {
-        Some(s) => Some(
-            Uuid::parse_str(&s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?,
-        ),
-        None => None,
-    };
-    let created_at = parse_datetime(&created_at_s)?;
-    let updated_at = parse_datetime(&updated_at_s)?;
-    let deleted_at = if let Some(s) = deleted_at_s {
-        Some(parse_datetime(&s)?)
-    } else {
-        None
-    };
+    let parent_id = get_optional_text(row, "parent_id")?
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+    let progress = get_required_i32(row, "progress")?;
+    let completed_at = parse_opt_datetime(get_optional_text(row, "completed_at")?)?;
+    let completed_at_is_backfilled = row
+        .try_get::<i64, _>("completed_at_is_backfilled")
+        .unwrap_or(0)
+        != 0;
+    let created_at = parse_datetime_value(&get_required_text(row, "created_at")?)?;
+    let updated_at = parse_datetime_value(&get_required_text(row, "updated_at")?)?;
+    let deleted_at = parse_opt_datetime(get_optional_text(row, "deleted_at")?)?;
 
     Ok(DbTask {
         id,
@@ -285,6 +252,12 @@ pub fn db_task_from_row(row: &SqliteRow) -> Result<DbTask, AppError> {
         title,
         description,
         status,
+        progress_method,
+        blocked_flag,
+        blocked_reason,
+        baseline_start_at,
+        baseline_end_at,
+        task_weight,
         due_date,
         start_date,
         end_date,
@@ -292,6 +265,44 @@ pub fn db_task_from_row(row: &SqliteRow) -> Result<DbTask, AppError> {
         assignee,
         parent_id,
         progress,
+        completed_at,
+        completed_at_is_backfilled,
+        created_at,
+        updated_at,
+        deleted_at,
+    })
+}
+
+pub fn db_task_progress_component_from_row(
+    row: &SqliteRow,
+) -> Result<DbTaskProgressComponent, AppError> {
+    let id = Uuid::parse_str(&get_required_text(row, "id")?)
+        .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+    let task_id = Uuid::parse_str(&get_required_text(row, "task_id")?)
+        .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
+    let name = get_required_text(row, "name")?;
+    let component_type = get_required_text(row, "component_type")?;
+    let weight = get_optional_f64(row, "weight")?
+        .ok_or_else(|| AppError::internal("missing weight".to_string()))?;
+    let completion_pct = get_optional_f64(row, "completion_pct")?
+        .ok_or_else(|| AppError::internal("missing completion_pct".to_string()))?;
+    let planned_at = parse_opt_datetime(get_optional_text(row, "planned_at")?)?;
+    let completed_at = parse_opt_datetime(get_optional_text(row, "completed_at")?)?;
+    let sort_order = get_required_i32(row, "sort_order")?;
+    let created_at = parse_datetime_value(&get_required_text(row, "created_at")?)?;
+    let updated_at = parse_datetime_value(&get_required_text(row, "updated_at")?)?;
+    let deleted_at = parse_opt_datetime(get_optional_text(row, "deleted_at")?)?;
+
+    Ok(DbTaskProgressComponent {
+        id,
+        task_id,
+        name,
+        component_type,
+        weight,
+        completion_pct,
+        planned_at,
+        completed_at,
+        sort_order,
         created_at,
         updated_at,
         deleted_at,
@@ -328,10 +339,10 @@ pub fn db_project_from_row(row: &SqliteRow) -> Result<DbProject, AppError> {
         Uuid::parse_str(&id_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
     let user_id = Uuid::parse_str(&user_id_s)
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let created_at = parse_datetime(&created_at_s)?;
-    let updated_at = parse_datetime(&updated_at_s)?;
+    let created_at = parse_datetime_value(&created_at_s)?;
+    let updated_at = parse_datetime_value(&updated_at_s)?;
     let deleted_at = if let Some(s) = deleted_at_s {
-        Some(parse_datetime(&s)?)
+        Some(parse_datetime_value(&s)?)
     } else {
         None
     };
@@ -379,10 +390,10 @@ pub fn db_user_from_row(row: &SqliteRow) -> Result<DbUser, AppError> {
 
     let id =
         Uuid::parse_str(&id_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let created_at = parse_datetime(&created_at_s)?;
-    let updated_at = parse_datetime(&updated_at_s)?;
+    let created_at = parse_datetime_value(&created_at_s)?;
+    let updated_at = parse_datetime_value(&updated_at_s)?;
     let deleted_at = if let Some(s) = deleted_at_s {
-        Some(parse_datetime(&s)?)
+        Some(parse_datetime_value(&s)?)
     } else {
         None
     };
@@ -427,9 +438,9 @@ pub fn db_project_plan_point_from_row(row: &SqliteRow) -> Result<DbProjectPlanPo
         Uuid::parse_str(&id_s).map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
     let project_id = Uuid::parse_str(&project_id_s)
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let date = parse_datetime(&date_s)?;
-    let created_at = parse_datetime(&created_at_s)?;
-    let updated_at = parse_datetime(&updated_at_s)?;
+    let date = parse_datetime_value(&date_s)?;
+    let created_at = parse_datetime_value(&created_at_s)?;
+    let updated_at = parse_datetime_value(&updated_at_s)?;
 
     Ok(DbProjectPlanPoint {
         id,
@@ -467,7 +478,7 @@ pub fn db_task_dependency_from_row(row: &SqliteRow) -> Result<DbTaskDependency, 
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
     let target_task_id = Uuid::parse_str(&target_task_id_s)
         .map_err(|e| AppError::internal(format!("invalid uuid: {}", e)))?;
-    let created_at = parse_datetime(&created_at_s)?;
+    let created_at = parse_datetime_value(&created_at_s)?;
 
     Ok(DbTaskDependency {
         id,

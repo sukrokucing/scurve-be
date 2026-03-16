@@ -52,6 +52,12 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
         .and_then(|v| v.as_str())
         .context("missing token")?
         .to_string();
+    let user_id = auth_res
+        .get("user")
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .context("missing user id")?
+        .to_string();
 
     // create project via API
     let project_body = json!({"name": "Dashboard Project"});
@@ -85,7 +91,12 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let project_id = project_uuid.to_string();
 
     // create a task via API
-    let task_body = json!({"title": "Dashboard Task", "status": "pending"});
+    let task_body = json!({
+        "title": "Dashboard Task",
+        "status": "pending",
+        "assignee": user_id,
+        "due_date": "2099-01-15T00:00:00Z"
+    });
     let req = Request::builder()
         .method("POST")
         .uri(format!("/projects/{}/tasks", project_id))
@@ -170,6 +181,54 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
         sqlx::query_scalar("SELECT id FROM resource_roles WHERE name = 'unclassified'")
             .fetch_one(&pool)
             .await?;
+    let access_role_id: String =
+        sqlx::query_scalar("SELECT id FROM roles WHERE name = 'project_owner'")
+            .fetch_one(&pool)
+            .await?;
+
+    let teammate_body = json!({
+        "name": "Idle Member",
+        "email": "idle_member@example.com",
+        "password": "password123"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/register")
+        .header("content-type", "application/json")
+        .body(Body::from(teammate_body.to_string()))?;
+    let resp: Response = app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
+    let teammate_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
+    let teammate_user_id = teammate_res
+        .get("user")
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .context("missing teammate user id")?
+        .to_string();
+
+    let add_member_body = json!({
+        "user_id": teammate_user_id,
+        "access_role_id": access_role_id,
+        "resource_role_ids": [unclassified_resource_role_id.clone()]
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/projects/{}/members", project_id))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::from(add_member_body.to_string()))?;
+    let resp: Response = app.clone().oneshot(req).await?;
+    let status = resp.status();
+    let body_bytes = body::to_bytes(resp.into_body(), 10_485_760).await?;
+    if status != StatusCode::CREATED {
+        panic!(
+            "member create failed: {} - {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
+    }
+
     let work_log_body = json!({
         "resource_role_id": unclassified_resource_role_id,
         "hours": 30.0,
@@ -209,6 +268,20 @@ async fn project_dashboard_returns_plan_and_actual() -> Result<()> {
     let dash_res: serde_json::Value = serde_json::from_slice(&body_bytes)?;
     // check structure
     assert!(dash_res.get("project").is_some());
+    assert_eq!(dash_res["overall_progress_pct"], 42.0);
+    assert_eq!(dash_res["assignment_coverage_pct"], 100.0);
+    assert_eq!(dash_res["due_date_coverage_pct"], 100.0);
+    assert_eq!(dash_res["task_status_counts"]["total"], 1);
+    assert_eq!(dash_res["task_status_counts"]["on_time"], 1);
+    assert_eq!(dash_res["task_status_counts"]["overdue"], 0);
+    let workload = dash_res["workload_distribution"]
+        .as_array()
+        .context("missing workload_distribution")?;
+    assert_eq!(workload.len(), 2);
+    assert_eq!(workload[0]["user_id"], user_id);
+    assert_eq!(workload[0]["task_count"], 1);
+    assert_eq!(workload[1]["user_id"], teammate_user_id);
+    assert_eq!(workload[1]["task_count"], 0);
     let plan = dash_res
         .get("plan")
         .and_then(|v| v.as_array())
