@@ -12,8 +12,10 @@ use crate::authz::RoutePermissionCache;
 use crate::errors::AppError;
 use crate::events::{self, EventBus};
 use crate::jwt::JwtConfig;
+use crate::realtime::RealtimeHub;
 use crate::routes::{
-    auth, health, progress, projects, rbac, resource_roles, tasks, telemetry, users, work_logs,
+    auth, health, notifications, progress, projects, rbac, realtime, resource_roles, tasks,
+    telemetry, users, work_logs,
 };
 
 fn env_var_u32(name: &str, default: u32) -> u32 {
@@ -28,20 +30,33 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub jwt: Arc<JwtConfig>,
     pub event_bus: EventBus,
+    pub realtime_hub: RealtimeHub,
     pub route_permission_cache: RoutePermissionCache,
 }
 
 impl AppState {
+    #[allow(dead_code)]
     pub fn new(
         pool: SqlitePool,
         jwt: JwtConfig,
         event_bus: EventBus,
         route_cache: RoutePermissionCache,
     ) -> Self {
+        Self::new_with_realtime(pool, jwt, event_bus, RealtimeHub::new(), route_cache)
+    }
+
+    pub fn new_with_realtime(
+        pool: SqlitePool,
+        jwt: JwtConfig,
+        event_bus: EventBus,
+        realtime_hub: RealtimeHub,
+        route_cache: RoutePermissionCache,
+    ) -> Self {
         Self {
             pool,
             jwt: Arc::new(jwt),
             event_bus,
+            realtime_hub,
             route_permission_cache: route_cache,
         }
     }
@@ -55,8 +70,16 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
 
     // Initialize Event Bus and Listener
     let (event_bus, rx) = events::init_event_bus();
+    let realtime_hub = RealtimeHub::new();
     let listener_pool = pool.clone();
     tokio::spawn(events::start_activity_listener(rx, listener_pool));
+    let realtime_pool = pool.clone();
+    let realtime_rx = event_bus.subscribe();
+    tokio::spawn(crate::realtime::start_realtime_dispatcher(
+        realtime_rx,
+        realtime_pool,
+        realtime_hub.clone(),
+    ));
 
     let route_cache = RoutePermissionCache::load(&pool)
         .await
@@ -67,7 +90,7 @@ pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
         .validate_against_openapi(&crate::docs::ApiDoc::openapi())
         .await;
 
-    let state = AppState::new(pool, jwt_config, event_bus, route_cache);
+    let state = AppState::new_with_realtime(pool, jwt_config, event_bus, realtime_hub, route_cache);
 
     Ok(api_routes(state))
 }
@@ -216,6 +239,18 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/:id", delete(work_logs::delete_work_log));
 
     let telemetry_routes = Router::new().route("/events", post(telemetry::ingest_events));
+    let notification_routes = Router::new()
+        .route("/", get(notifications::list_notifications))
+        .route(
+            "/unread-count",
+            get(notifications::get_unread_notification_count),
+        )
+        .route("/read", post(notifications::mark_notifications_read))
+        .route(
+            "/read-all",
+            post(notifications::mark_notifications_read_all),
+        );
+    let realtime_routes = Router::new().route("/ws", get(realtime::websocket_feed));
 
     let portfolio_routes = Router::new().route(
         "/s-curve/summary",
@@ -249,6 +284,8 @@ pub fn api_routes(state: AppState) -> Router {
         .nest("/projects/:project_id/progress", project_progress_routes)
         .nest("/projects/:project_id/dependencies", dependency_routes)
         .nest("/portfolio", portfolio_routes)
+        .nest("/notifications", notification_routes)
+        .nest("/realtime", realtime_routes)
         .nest("/tasks/:task_id/progress", legacy_task_progress_routes)
         .nest("/telemetry", telemetry_routes)
         .nest("/rbac", rbac::routes(state.clone()))

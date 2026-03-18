@@ -253,6 +253,7 @@ pub async fn create_progress(
     State(state): State<AppState>,
     Path((project_id, task_id)): Path<(Uuid, Uuid)>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<ProgressCreateRequest>,
 ) -> AppResult<(StatusCode, Json<Progress>)> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
@@ -307,6 +308,16 @@ pub async fn create_progress(
 
     let parsed = row_parsers::db_progress_from_row(&row)?;
     let item: Progress = parsed.try_into()?;
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "created",
+        Some(auth.user_id),
+        &item,
+        None,
+        Some(ctx),
+    );
     Ok((StatusCode::CREATED, Json(item)))
 }
 
@@ -323,6 +334,7 @@ pub async fn update_progress(
     State(state): State<AppState>,
     Path((project_id, task_id, id)): Path<(Uuid, Uuid, Uuid)>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<ProgressUpdateRequest>,
 ) -> AppResult<Json<Progress>> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
@@ -349,6 +361,7 @@ pub async fn update_progress(
         .ok_or_else(|| AppError::not_found("progress entry not found"))?;
 
     let mut row = row_parsers::db_progress_from_row(&row)?;
+    let old_item: Progress = row.clone().try_into()?;
 
     if let Some(p) = payload.progress {
         if !(0..=100).contains(&p) {
@@ -376,6 +389,16 @@ pub async fn update_progress(
 
     row.updated_at = now;
     let item: Progress = row.try_into()?;
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "updated",
+        Some(auth.user_id),
+        &item,
+        Some(&old_item),
+        Some(ctx),
+    );
     Ok(Json(item))
 }
 
@@ -391,13 +414,34 @@ pub async fn delete_progress(
     State(state): State<AppState>,
     Path((project_id, task_id, id)): Path<(Uuid, Uuid, Uuid)>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
 ) -> AppResult<StatusCode> {
     ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
     ensure_manual_progress_task(&state.pool, task_id).await?;
 
-    let now = utc_now();
+    let id_case = uuid_sql::case_uuid("id");
+    let project_case = uuid_sql::case_uuid("project_id");
+    let task_case = uuid_sql::case_uuid("task_id");
     let match_id = uuid_sql::match_uuid_clause("id");
     let match_task = uuid_sql::match_uuid_clause("task_id");
+    let lookup_sql = format!(
+        "SELECT {} , {} , {} , progress, note, created_at, updated_at, deleted_at
+         FROM task_progress
+         WHERE {} AND {} AND deleted_at IS NULL",
+        id_case, project_case, task_case, match_id, match_task
+    );
+    let existing = sqlx::query(&lookup_sql)
+        .bind(id.to_string())
+        .bind(id.to_string())
+        .bind(task_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::not_found("progress entry not found"))?;
+    let mut existing = row_parsers::db_progress_from_row(&existing)?;
+    let old_item: Progress = existing.clone().try_into()?;
+
+    let now = utc_now();
     let sql = format!("UPDATE task_progress SET deleted_at = ?, updated_at = ? WHERE {} AND {} AND deleted_at IS NULL", match_id, match_task);
 
     let affected = sqlx::query(&sql)
@@ -415,6 +459,19 @@ pub async fn delete_progress(
     }
 
     task_metrics::refresh_task_snapshot(&state.pool, task_id).await?;
+    existing.deleted_at = Some(now);
+    existing.updated_at = now;
+    let deleted_item: Progress = existing.try_into()?;
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "deleted",
+        Some(auth.user_id),
+        &deleted_item,
+        Some(&old_item),
+        Some(ctx),
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }

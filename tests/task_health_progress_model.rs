@@ -368,3 +368,107 @@ async fn weighted_components_drive_task_health_filters_and_dashboard_rollups() -
 
     Ok(())
 }
+
+#[tokio::test]
+async fn baseline_window_is_derived_from_timeline_dates_when_omitted() -> Result<()> {
+    let (app, _pool, token, _owner_id, project_id, _test_db) = setup().await?;
+    let now = Utc::now();
+    let start = (now - Duration::days(7)).to_rfc3339();
+    let end = (now + Duration::days(7)).to_rfc3339();
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/projects/{}/tasks", project_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "title": "Timeline-backed Task",
+                        "status": "in_progress",
+                        "progress": 45,
+                        "start_date": start,
+                        "end_date": end
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = json_response(created).await?;
+    let task_id = created["id"].as_str().unwrap();
+    assert_eq!(created["baseline_start_at"], created["start_date"]);
+    assert_eq!(created["baseline_end_at"], created["end_date"]);
+    assert!(created["expected_progress_pct"].is_number());
+    assert!(created["variance_pct"].is_number());
+    assert_ne!(created["health_status"], "needs_plan");
+
+    let updated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/projects/{}/tasks", project_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "title": "Due-date fallback Task",
+                        "status": "in_progress",
+                        "progress": 20
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(updated.status(), StatusCode::CREATED);
+    let updated = json_response(updated).await?;
+    let update_task_id = updated["id"].as_str().unwrap();
+
+    let start = (now - Duration::days(3)).to_rfc3339();
+    let due = (now + Duration::days(5)).to_rfc3339();
+    let updated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/projects/{}/tasks/{}", project_id, update_task_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "start_date": start,
+                        "due_date": due
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated = json_response(updated).await?;
+    assert_eq!(updated["id"], update_task_id);
+    assert_eq!(updated["baseline_start_at"], updated["start_date"]);
+    assert_eq!(updated["baseline_end_at"], updated["due_date"]);
+    assert!(updated["expected_progress_pct"].is_number());
+    assert!(updated["variance_pct"].is_number());
+    assert_ne!(updated["health_status"], "needs_plan");
+
+    let fetched = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/projects/{}/tasks/{}", project_id, task_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(fetched.status(), StatusCode::OK);
+    let fetched = json_response(fetched).await?;
+    assert_eq!(fetched["baseline_start_at"], fetched["start_date"]);
+    assert_eq!(fetched["baseline_end_at"], fetched["end_date"]);
+
+    Ok(())
+}

@@ -85,12 +85,30 @@ impl FromRequestParts<AppState> for AuthUser {
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "))
+            .map(str::to_owned)
+            .or_else(|| websocket_query_token(parts))
             .ok_or_else(|| AppError::unauthorized("Authorization header missing"))?;
 
-        let claims = state.jwt.decode(token)?;
+        let claims = state.jwt.decode(&token)?;
 
         Ok(AuthUser {
             user_id: claims.sub,
         })
     }
+}
+
+fn websocket_query_token(parts: &Parts) -> Option<String> {
+    let path = parts.uri.path();
+    if path != "/realtime/ws" && path != "/ws" && !path.ends_with("/realtime/ws") {
+        return None;
+    }
+
+    parts.uri.query().and_then(|query| {
+        query.split('&').find_map(|pair| {
+            let mut segments = pair.splitn(2, '=');
+            let key = segments.next()?;
+            let value = segments.next().unwrap_or_default();
+            (key == "token" && !value.is_empty()).then(|| value.to_string())
+        })
+    })
 }

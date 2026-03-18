@@ -152,6 +152,67 @@ fn openapi_has_dashboard_summary_fields() -> anyhow::Result<()> {
 }
 
 #[test]
+fn openapi_has_realtime_presence_and_notification_enrichment() -> anyhow::Result<()> {
+    let doc = s_curve::docs::build_openapi(8000)?;
+    let v = serde_json::to_value(&doc)?;
+
+    let schemas = v
+        .get("components")
+        .and_then(Value::as_object)
+        .and_then(|c| c.get("schemas"))
+        .and_then(Value::as_object)
+        .expect("components.schemas must exist");
+
+    let notification_props = schemas
+        .get("Notification")
+        .and_then(Value::as_object)
+        .and_then(|s| s.get("properties"))
+        .and_then(Value::as_object)
+        .expect("Notification.properties must exist");
+    for key in ["project_name", "title", "message", "route", "severity"] {
+        assert!(
+            notification_props.contains_key(key),
+            "Notification missing '{}'",
+            key
+        );
+    }
+
+    let metadata_schema = schemas
+        .get("RealtimeEventMetadata")
+        .and_then(Value::as_object)
+        .expect("RealtimeEventMetadata schema must exist");
+    assert!(
+        metadata_schema.contains_key("oneOf"),
+        "RealtimeEventMetadata should be expressed as oneOf"
+    );
+
+    let presence_props = schemas
+        .get("RealtimePresenceMetadata")
+        .and_then(Value::as_object)
+        .and_then(|s| s.get("properties"))
+        .and_then(Value::as_object)
+        .expect("RealtimePresenceMetadata.properties must exist");
+    for key in ["user_id", "status", "last_seen_at", "project_snapshot"] {
+        assert!(
+            presence_props.contains_key(key),
+            "RealtimePresenceMetadata missing '{}'",
+            key
+        );
+    }
+
+    let command_schema = schemas
+        .get("RealtimeClientCommand")
+        .expect("RealtimeClientCommand schema must exist");
+    let command_json = serde_json::to_string(command_schema)?;
+    assert!(
+        command_json.contains("\"route\""),
+        "RealtimeClientCommand should expose optional subscribe route"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn openapi_has_task_list_sort_enums() -> anyhow::Result<()> {
     let doc = s_curve::docs::build_openapi(8000)?;
     let v = serde_json::to_value(&doc)?;

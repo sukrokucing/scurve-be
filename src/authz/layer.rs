@@ -106,7 +106,12 @@ fn extract_resource_context(method: &str, path: &str) -> ResourceContext {
     // be reachable with scoped project permissions.
     let is_project_agnostic_list = (method.eq_ignore_ascii_case("GET") && path == "/projects")
         || (method.eq_ignore_ascii_case("GET") && path == "/users/me/projects")
-        || (method.eq_ignore_ascii_case("GET") && path == "/portfolio/s-curve/summary");
+        || (method.eq_ignore_ascii_case("GET") && path == "/portfolio/s-curve/summary")
+        || path == "/notifications"
+        || path == "/notifications/unread-count"
+        || path == "/notifications/read"
+        || path == "/notifications/read-all"
+        || path == "/realtime/ws";
 
     if is_project_agnostic_list {
         ctx = ctx.allow_project_scoped_without_target();

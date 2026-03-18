@@ -9,6 +9,7 @@ mod errors;
 mod events;
 mod jwt;
 mod models;
+mod realtime;
 mod routes;
 mod task_metrics;
 mod utils;

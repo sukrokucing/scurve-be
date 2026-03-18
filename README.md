@@ -209,6 +209,11 @@ Auth flow in Swagger:
 | GET | `/projects/{id}/dashboard` | Yes | Dashboard payload with metric series (`metric=progress|hours|cost`) plus task summary aggregates |
 | GET | `/projects/{id}/s-curve/health` | Yes | S-curve health (`metric=progress|hours|cost`) |
 | GET | `/portfolio/s-curve/summary` | Yes | Portfolio-level S-curve summary |
+| GET | `/notifications` | Yes | Visible durable notifications for the current user |
+| GET | `/notifications/unread-count` | Yes | Visible unread notification count |
+| POST | `/notifications/read` | Yes | Mark selected notifications as read |
+| POST | `/notifications/read-all` | Yes | Mark all visible notifications as read |
+| GET | `/realtime/ws` | Yes | WebSocket feed for notifications, presence, and project invalidation signals |
 | POST | `/telemetry/events` | Yes | Ingest frontend telemetry batch (idempotent by `event_id`) |
 | GET/POST/DELETE | `/rbac/...` | Yes | RBAC administration |
 
@@ -268,6 +273,10 @@ Legacy compatibility:
 - Direct `progress` writes are only allowed when `progress_method=manual_percent_legacy`.
 - For `weighted_components` tasks, use `GET/PUT /projects/{project_id}/tasks/{id}/progress-components`.
 - If a `weighted_components` task receives direct progress writes through task/progress endpoints, backend returns `400`.
+- If `baseline_start_at` / `baseline_end_at` are omitted, backend derives them from timeline fields when possible:
+  - start from `start_date`
+  - end from `end_date`, or `due_date` as fallback
+  - invalid or incomplete timeline still leaves `health_status=needs_plan`
 
 ### Task Health Rules
 
@@ -331,6 +340,48 @@ Progress metric source rules:
 - If `project_plan` is absent, backend falls back to weighted task `expected_progress_pct`.
 - Actual progress comes from weighted task actual-progress rollups.
 - If weighted task actuals are unavailable, backend falls back to legacy `task_progress.progress` history.
+
+### Notifications & Realtime
+
+- Durable notification REST endpoints:
+  - `GET /notifications`
+  - `GET /notifications/unread-count`
+  - `POST /notifications/read`
+  - `POST /notifications/read-all`
+- WebSocket feed:
+  - `GET /realtime/ws`
+  - authenticate with standard `Authorization: Bearer <token>` when the client can set headers
+  - browser clients may use `?token=<jwt>` as a query fallback
+- Client commands over the WebSocket:
+  - `{"type":"subscribe","project_ids":["<project-id>"],"route":"/tasks"}`
+  - `{"type":"unsubscribe","project_ids":["<project-id>"]}`
+  - `{"type":"ping"}`
+- Event families:
+  - `notification`
+  - `presence`
+  - `data_changed`
+- Presence payload shape:
+  - websocket presence events keep the generic realtime envelope
+  - for `family="presence"`, `metadata` is now typed with:
+    - `user_id`
+    - `status` (`online|offline`)
+    - `last_seen_at`
+    - optional `route`
+    - optional `project_snapshot` array for `change_type="snapshot"`
+  - if the client sends `route` in the subscribe command, backend echoes it into presence snapshots and `online`/`updated` presence events
+  - clients may re-send `subscribe` with the same `project_ids` and a new `route` to refresh presence context without reopening the socket
+- Durable notification fields:
+  - `GET /notifications` now also returns:
+    - `project_name`
+    - `title`
+    - `message`
+    - `route`
+    - `severity`
+- Delivery model:
+  - REST remains the source of truth for CRUD reads
+  - WebSocket messages are invalidation and awareness signals only
+  - project-scoped presence, `data_changed`, and durable notification visibility require effective backend `project.view` access, not just raw membership
+  - durable notifications are automatically hidden when the user loses project visibility
 
 ### Progress vs Work Logs
 

@@ -10,7 +10,7 @@ pub enum WorkLogSource {
     MigratedTaskProgress,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct WorkLog {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -30,6 +30,16 @@ pub struct WorkLog {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl crate::events::Loggable for WorkLog {
+    fn entity_type() -> &'static str {
+        "work_log"
+    }
+
+    fn subject_id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

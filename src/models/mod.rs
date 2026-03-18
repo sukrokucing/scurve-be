@@ -1,10 +1,12 @@
 pub mod audit_log;
 pub mod dependency;
+pub mod notification;
 pub mod progress;
 pub mod project;
 pub mod project_member;
 pub mod project_plan;
 pub mod rbac;
+pub mod realtime;
 pub mod resource_role;
 pub mod s_curve;
 pub mod task;

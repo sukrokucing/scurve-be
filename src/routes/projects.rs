@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::authz::Principal;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::project::{DbProject, Project, ProjectCreateRequest, ProjectUpdateRequest};
@@ -18,6 +19,10 @@ use crate::models::project_member::{
     MyProjectScopeSummary, ProjectMember, ProjectMemberCreateRequest,
 };
 use crate::models::project_plan::ProjectPlanPoint;
+use crate::models::realtime::{
+    RealtimeActor, RealtimeEvent, RealtimeEventFamily, RealtimeEventMetadata,
+    RealtimeInvalidateMetadata,
+};
 use crate::models::s_curve::{
     PortfolioSCurveProjectSummary, PortfolioSCurveSummaryResponse, Rule5070Status,
     SCurveDataStatus, SCurveHealthResponse, SCurveMetric, SCurveStage,
@@ -34,6 +39,43 @@ use utoipa::ToSchema;
 const DEFAULT_THEME: &str = "#3498db";
 const PROJECT_OWNER_ROLE: &str = "project_owner";
 const UNCLASSIFIED_RESOURCE_ROLE_ID: &str = "40000000-0000-0000-0000-000000000001";
+
+async fn broadcast_membership_change(
+    state: &AppState,
+    project_id: Uuid,
+    actor: RealtimeActor,
+    target_user_id: Uuid,
+    change_type: &str,
+    exclude_user_id: Option<Uuid>,
+) {
+    state
+        .realtime_hub
+        .broadcast_project(
+            project_id,
+            RealtimeEvent {
+                family: RealtimeEventFamily::DataChanged,
+                project_id: Some(project_id),
+                event_id: Uuid::new_v4(),
+                actor,
+                entity_type: "project_membership".to_string(),
+                entity_id: Some(target_user_id),
+                change_type: change_type.to_string(),
+                occurred_at: Utc::now(),
+                unread_count: None,
+                metadata: Some(RealtimeEventMetadata::Invalidate(
+                    RealtimeInvalidateMetadata {
+                        invalidate: vec![
+                            "project_members".to_string(),
+                            "projects".to_string(),
+                            "users_me_projects".to_string(),
+                        ],
+                    },
+                )),
+            },
+            exclude_user_id,
+        )
+        .await;
+}
 
 #[utoipa::path(
     get,
@@ -1543,6 +1585,28 @@ pub async fn create_project_member(
     .await?;
 
     let member = fetch_project_member(&state.pool, project_id, payload.user_id).await?;
+    Principal::invalidate_cache_for(payload.user_id);
+
+    let actor = crate::realtime::fetch_actor_info(&state.pool, auth.user_id)
+        .await
+        .unwrap_or_else(|_| crate::realtime::system_actor());
+    crate::realtime::emit_membership_refresh_event(
+        &state.realtime_hub,
+        payload.user_id,
+        actor.clone(),
+        project_id,
+        "added",
+    )
+    .await;
+    broadcast_membership_change(
+        &state,
+        project_id,
+        actor,
+        payload.user_id,
+        "added",
+        Some(auth.user_id),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(member)))
 }
 
@@ -1636,6 +1700,32 @@ pub async fn delete_project_member(
             .execute(&state.pool)
             .await?;
     }
+
+    Principal::invalidate_cache_for(user_id);
+    state
+        .realtime_hub
+        .force_unsubscribe_user_from_project(user_id, project_id)
+        .await;
+    let actor = crate::realtime::fetch_actor_info(&state.pool, auth.user_id)
+        .await
+        .unwrap_or_else(|_| crate::realtime::system_actor());
+    crate::realtime::emit_membership_refresh_event(
+        &state.realtime_hub,
+        user_id,
+        actor.clone(),
+        project_id,
+        "removed",
+    )
+    .await;
+    broadcast_membership_change(
+        &state,
+        project_id,
+        actor,
+        user_id,
+        "removed",
+        Some(auth.user_id),
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

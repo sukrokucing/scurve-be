@@ -546,6 +546,240 @@
         ]
       }
     },
+    "/notifications": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "List Notifications",
+        "description": "List Notifications Handles `GET` requests for `/notifications`. Requires bearer authentication.",
+        "operationId": "list_notifications",
+        "responses": {
+          "200": {
+            "description": "Visible notifications for the current user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Notification"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "List Notifications Handles `GET` requests for `/notifications`. Requires bearer authentication.",
+        "operationId": "list_notifications",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Notification"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Visible notifications for the current user"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List Notifications",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/read": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark Notifications Read",
+        "description": "Mark Notifications Read Handles `POST` requests for `/notifications/read`. Requires bearer authentication.",
+        "operationId": "mark_notifications_read",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotificationsReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Notifications marked as read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationsReadResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "description": "Mark Notifications Read Handles `POST` requests for `/notifications/read`. Requires bearer authentication.",
+        "operationId": "mark_notifications_read",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotificationsReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationsReadResponse"
+                }
+              }
+            },
+            "description": "Notifications marked as read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mark Notifications Read",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/read-all": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark Notifications Read All",
+        "description": "Mark Notifications Read All Handles `POST` requests for `/notifications/read-all`. Requires bearer authentication.",
+        "operationId": "mark_notifications_read_all",
+        "responses": {
+          "200": {
+            "description": "All visible notifications marked as read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationsReadResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "description": "Mark Notifications Read All Handles `POST` requests for `/notifications/read-all`. Requires bearer authentication.",
+        "operationId": "mark_notifications_read_all",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationsReadResponse"
+                }
+              }
+            },
+            "description": "All visible notifications marked as read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mark Notifications Read All",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/unread-count": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Get Unread Notification Count",
+        "description": "Get Unread Notification Count Handles `GET` requests for `/notifications/unread-count`. Requires bearer authentication.",
+        "operationId": "get_unread_notification_count",
+        "responses": {
+          "200": {
+            "description": "Unread notification count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationUnreadCountResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "Get Unread Notification Count Handles `GET` requests for `/notifications/unread-count`. Requires bearer authentication.",
+        "operationId": "get_unread_notification_count",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationUnreadCountResponse"
+                }
+              }
+            },
+            "description": "Unread notification count"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get Unread Notification Count",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
     "/portfolio/s-curve/summary": {
       "get": {
         "tags": [
@@ -717,44 +951,6 @@
           }
         ]
       },
-      "get": {
-        "description": "List Projects Handles `GET` requests for `/projects`. Requires bearer authentication.",
-        "operationId": "list_projects",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "created_at": "2025-01-15T10:00:00Z",
-                    "id": "44444444-4444-4444-8444-444444444444",
-                    "name": "Launch Planning",
-                    "theme_color": "#3498db",
-                    "updated_at": "2025-01-15T10:00:00Z",
-                    "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Project"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List projects"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List Projects",
-        "tags": [
-          "Projects"
-        ]
-      },
       "post": {
         "description": "Create Project Handles `POST` requests for `/projects`. Requires bearer authentication.",
         "operationId": "create_project",
@@ -799,6 +995,44 @@
           }
         ],
         "summary": "Create Project",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "get": {
+        "description": "List Projects Handles `GET` requests for `/projects`. Requires bearer authentication.",
+        "operationId": "list_projects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-01-15T10:00:00Z",
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "name": "Launch Planning",
+                    "theme_color": "#3498db",
+                    "updated_at": "2025-01-15T10:00:00Z",
+                    "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List projects"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List Projects",
         "tags": [
           "Projects"
         ]
@@ -942,83 +1176,6 @@
           }
         ]
       },
-      "delete": {
-        "description": "Delete Project Handles `DELETE` requests for `/projects/{id}`. Requires bearer authentication.",
-        "operationId": "delete_project",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Project soft deleted"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete Project",
-        "tags": [
-          "Projects"
-        ]
-      },
-      "get": {
-        "description": "Get Project Handles `GET` requests for `/projects/{id}`. Requires bearer authentication.",
-        "operationId": "get_project",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "created_at": "2025-01-15T10:00:00Z",
-                  "id": "44444444-4444-4444-8444-444444444444",
-                  "name": "Launch Planning",
-                  "theme_color": "#3498db",
-                  "updated_at": "2025-01-15T10:00:00Z",
-                  "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            },
-            "description": "Project detail"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Get Project",
-        "tags": [
-          "Projects"
-        ]
-      },
       "put": {
         "description": "Update Project Handles `PUT` requests for `/projects/{id}`. Requires bearer authentication.",
         "operationId": "update_project",
@@ -1075,6 +1232,83 @@
           }
         ],
         "summary": "Update Project",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "get": {
+        "description": "Get Project Handles `GET` requests for `/projects/{id}`. Requires bearer authentication.",
+        "operationId": "get_project",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-01-15T10:00:00Z",
+                  "id": "44444444-4444-4444-8444-444444444444",
+                  "name": "Launch Planning",
+                  "theme_color": "#3498db",
+                  "updated_at": "2025-01-15T10:00:00Z",
+                  "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Project detail"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get Project",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "delete": {
+        "description": "Delete Project Handles `DELETE` requests for `/projects/{id}`. Requires bearer authentication.",
+        "operationId": "delete_project",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project soft deleted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete Project",
         "tags": [
           "Projects"
         ]
@@ -1433,37 +1667,6 @@
           }
         ]
       },
-      "delete": {
-        "description": "Clear Project Plan Handles `DELETE` requests for `/projects/{id}/plan`. Requires bearer authentication.",
-        "operationId": "clear_project_plan",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Project plan cleared"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Clear Project Plan",
-        "tags": [
-          "Projects"
-        ]
-      },
       "post": {
         "description": "Update Project Plan Handles `POST` requests for `/projects/{id}/plan`. Requires bearer authentication.",
         "operationId": "update_project_plan",
@@ -1533,6 +1736,37 @@
           }
         ],
         "summary": "Update Project Plan",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "delete": {
+        "description": "Clear Project Plan Handles `DELETE` requests for `/projects/{id}/plan`. Requires bearer authentication.",
+        "operationId": "clear_project_plan",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project plan cleared"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear Project Plan",
         "tags": [
           "Projects"
         ]
@@ -2957,44 +3191,6 @@
           }
         ]
       },
-      "get": {
-        "description": "Get Task Health Rules Handles `GET` requests for `/projects/{project_id}/task-health/rules`. Requires bearer authentication.",
-        "operationId": "get_task_health_rules",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskHealthRuleSetResponse"
-                }
-              }
-            },
-            "description": "Effective task health rules"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Get Task Health Rules",
-        "tags": [
-          "Projects"
-        ]
-      },
       "put": {
         "description": "Update Task Health Rules Handles `PUT` requests for `/projects/{project_id}/task-health/rules`. Requires bearer authentication.",
         "operationId": "update_task_health_rules",
@@ -3039,6 +3235,44 @@
           }
         ],
         "summary": "Update Task Health Rules",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "get": {
+        "description": "Get Task Health Rules Handles `GET` requests for `/projects/{project_id}/task-health/rules`. Requires bearer authentication.",
+        "operationId": "get_task_health_rules",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskHealthRuleSetResponse"
+                }
+              }
+            },
+            "description": "Effective task health rules"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get Task Health Rules",
         "tags": [
           "Projects"
         ]
@@ -3333,67 +3567,6 @@
           }
         ]
       },
-      "post": {
-        "description": "Create Task Handles `POST` requests for `/projects/{project_id}/tasks`. Requires bearer authentication.",
-        "operationId": "create_task",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "status": "pending",
-                "title": "Define launch checklist"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/TaskCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "created_at": "2025-01-16T09:00:00Z",
-                  "id": "33333333-3333-4333-8333-333333333333",
-                  "progress": 0,
-                  "project_id": "44444444-4444-4444-8444-444444444444",
-                  "status": "pending",
-                  "title": "Define checklist",
-                  "updated_at": "2025-01-16T09:00:00Z"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Task"
-                }
-              }
-            },
-            "description": "Task created"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Create Task",
-        "tags": [
-          "Tasks"
-        ]
-      },
       "get": {
         "description": "List Tasks Handles `GET` requests for `/projects/{project_id}/tasks`. Requires bearer authentication.",
         "operationId": "list_tasks",
@@ -3620,6 +3793,67 @@
         "tags": [
           "Tasks"
         ]
+      },
+      "post": {
+        "description": "Create Task Handles `POST` requests for `/projects/{project_id}/tasks`. Requires bearer authentication.",
+        "operationId": "create_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "status": "pending",
+                "title": "Define launch checklist"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TaskCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-01-16T09:00:00Z",
+                  "id": "33333333-3333-4333-8333-333333333333",
+                  "progress": 0,
+                  "project_id": "44444444-4444-4444-8444-444444444444",
+                  "status": "pending",
+                  "title": "Define checklist",
+                  "updated_at": "2025-01-16T09:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            },
+            "description": "Task created"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create Task",
+        "tags": [
+          "Tasks"
+        ]
       }
     },
     "/projects/{project_id}/tasks/batch": {
@@ -3751,6 +3985,63 @@
           }
         ]
       },
+      "delete": {
+        "description": "Batch Delete Tasks Handles `DELETE` requests for `/projects/{project_id}/tasks/batch`. Requires bearer authentication.",
+        "operationId": "batch_delete_tasks",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "ids": [
+                  "33333333-3333-4333-8333-333333333333",
+                  "22222222-2222-4222-8222-222222222222"
+                ]
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TaskBatchDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "deleted": 2
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TaskBatchDeleteResponse"
+                }
+              }
+            },
+            "description": "Tasks soft deleted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Batch Delete Tasks",
+        "tags": [
+          "Tasks"
+        ]
+      },
       "put": {
         "description": "Batch Update Tasks Handles `PUT` requests for `/projects/{project_id}/tasks/batch`. Requires bearer authentication.",
         "operationId": "batch_update_tasks",
@@ -3818,63 +4109,6 @@
           }
         ],
         "summary": "Batch Update Tasks",
-        "tags": [
-          "Tasks"
-        ]
-      },
-      "delete": {
-        "description": "Batch Delete Tasks Handles `DELETE` requests for `/projects/{project_id}/tasks/batch`. Requires bearer authentication.",
-        "operationId": "batch_delete_tasks",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "ids": [
-                  "33333333-3333-4333-8333-333333333333",
-                  "22222222-2222-4222-8222-222222222222"
-                ]
-              },
-              "schema": {
-                "$ref": "#/components/schemas/TaskBatchDeleteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "deleted": 2
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/TaskBatchDeleteResponse"
-                }
-              }
-            },
-            "description": "Tasks soft deleted"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Batch Delete Tasks",
         "tags": [
           "Tasks"
         ]
@@ -4054,48 +4288,6 @@
           }
         ]
       },
-      "delete": {
-        "description": "Delete Task Handles `DELETE` requests for `/projects/{project_id}/tasks/{id}`. Requires bearer authentication.",
-        "operationId": "delete_task",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Task id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Task soft deleted"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete Task",
-        "tags": [
-          "Tasks"
-        ]
-      },
       "put": {
         "description": "Update Task Handles `PUT` requests for `/projects/{project_id}/tasks/{id}`. Requires bearer authentication.",
         "operationId": "update_task",
@@ -4165,6 +4357,48 @@
           }
         ],
         "summary": "Update Task",
+        "tags": [
+          "Tasks"
+        ]
+      },
+      "delete": {
+        "description": "Delete Task Handles `DELETE` requests for `/projects/{project_id}/tasks/{id}`. Requires bearer authentication.",
+        "operationId": "delete_task",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Task soft deleted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete Task",
         "tags": [
           "Tasks"
         ]
@@ -5161,6 +5395,59 @@
           "Progress"
         ]
       },
+      "delete": {
+        "description": "Delete Progress Handles `DELETE` requests for `/projects/{project_id}/tasks/{task_id}/progress/{id}`. Requires bearer authentication.",
+        "operationId": "delete_progress",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Progress id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Progress soft deleted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete Progress",
+        "tags": [
+          "Progress"
+        ]
+      },
       "get": {
         "description": "Get Progress Handles `GET` requests for `/projects/{project_id}/tasks/{task_id}/progress/{id}`. Requires bearer authentication.",
         "operationId": "get_progress",
@@ -5226,59 +5513,6 @@
           }
         ],
         "summary": "Get Progress",
-        "tags": [
-          "Progress"
-        ]
-      },
-      "delete": {
-        "description": "Delete Progress Handles `DELETE` requests for `/projects/{project_id}/tasks/{task_id}/progress/{id}`. Requires bearer authentication.",
-        "operationId": "delete_progress",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Task id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Progress id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Progress soft deleted"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete Progress",
         "tags": [
           "Progress"
         ]
@@ -5442,79 +5676,6 @@
           }
         ]
       },
-      "get": {
-        "description": "List Work Logs Handles `GET` requests for `/projects/{project_id}/tasks/{task_id}/work-logs`. Requires bearer authentication.",
-        "operationId": "list_work_logs",
-        "parameters": [
-          {
-            "description": "Project id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Task id",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "cost_amount": 352.0,
-                    "created_at": "2026-03-10T07:00:00Z",
-                    "currency_snapshot": "USD",
-                    "deleted_at": null,
-                    "hourly_rate_snapshot": 88.0,
-                    "hours": 4.0,
-                    "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-                    "note": "Implemented server-side pagination",
-                    "project_id": "44444444-4444-4444-8444-444444444444",
-                    "resource_role_id": "40000000-0000-0000-0000-000000000003",
-                    "resource_role_name": "backend_engineer",
-                    "source": "manual",
-                    "task_id": "33333333-3333-4333-8333-333333333333",
-                    "updated_at": "2026-03-10T07:00:00Z",
-                    "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                    "user_name": "Ada Lovelace",
-                    "work_date": "2026-03-10"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/WorkLog"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List work logs"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List Work Logs",
-        "tags": [
-          "Progress"
-        ]
-      },
       "post": {
         "description": "Create Work Log Handles `POST` requests for `/projects/{project_id}/tasks/{task_id}/work-logs`. Requires bearer authentication.",
         "operationId": "create_work_log",
@@ -5595,6 +5756,79 @@
           }
         ],
         "summary": "Create Work Log",
+        "tags": [
+          "Progress"
+        ]
+      },
+      "get": {
+        "description": "List Work Logs Handles `GET` requests for `/projects/{project_id}/tasks/{task_id}/work-logs`. Requires bearer authentication.",
+        "operationId": "list_work_logs",
+        "parameters": [
+          {
+            "description": "Project id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Task id",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "cost_amount": 352.0,
+                    "created_at": "2026-03-10T07:00:00Z",
+                    "currency_snapshot": "USD",
+                    "deleted_at": null,
+                    "hourly_rate_snapshot": 88.0,
+                    "hours": 4.0,
+                    "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                    "note": "Implemented server-side pagination",
+                    "project_id": "44444444-4444-4444-8444-444444444444",
+                    "resource_role_id": "40000000-0000-0000-0000-000000000003",
+                    "resource_role_name": "backend_engineer",
+                    "source": "manual",
+                    "task_id": "33333333-3333-4333-8333-333333333333",
+                    "updated_at": "2026-03-10T07:00:00Z",
+                    "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "user_name": "Ada Lovelace",
+                    "work_date": "2026-03-10"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkLog"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List work logs"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List Work Logs",
         "tags": [
           "Progress"
         ]
@@ -6247,43 +6481,6 @@
           }
         ]
       },
-      "get": {
-        "description": "List all permissions Handles `GET` requests for `/rbac/permissions`. Requires bearer authentication.",
-        "operationId": "list_permissions",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": [
-                  {
-                    "created_at": "2025-01-01T00:00:00Z",
-                    "description": "View projects",
-                    "id": "66666666-6666-4666-8666-666666666666",
-                    "name": "project.view",
-                    "updated_at": "2025-01-01T00:00:00Z"
-                  }
-                ],
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Permission"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "List of permissions"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List all permissions",
-        "tags": [
-          "RBAC"
-        ]
-      },
       "post": {
         "description": "Create a new permission Handles `POST` requests for `/rbac/permissions`. Requires bearer authentication.",
         "operationId": "create_permission",
@@ -6329,6 +6526,43 @@
           }
         ],
         "summary": "Create a new permission",
+        "tags": [
+          "RBAC"
+        ]
+      },
+      "get": {
+        "description": "List all permissions Handles `GET` requests for `/rbac/permissions`. Requires bearer authentication.",
+        "operationId": "list_permissions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "description": "View projects",
+                    "id": "66666666-6666-4666-8666-666666666666",
+                    "name": "project.view",
+                    "updated_at": "2025-01-01T00:00:00Z"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Permission"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "List of permissions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List all permissions",
         "tags": [
           "RBAC"
         ]
@@ -6591,40 +6825,6 @@
           }
         ]
       },
-      "delete": {
-        "description": "Delete a role Handles `DELETE` requests for `/rbac/roles/{role_id}`. Requires bearer authentication.",
-        "operationId": "delete_role",
-        "parameters": [
-          {
-            "description": "Role ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "role_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Role deleted"
-          },
-          "404": {
-            "description": "Role not found"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete a role",
-        "tags": [
-          "RBAC"
-        ]
-      },
       "get": {
         "description": "Get a role by ID Handles `GET` requests for `/rbac/roles/{role_id}`. Requires bearer authentication.",
         "operationId": "get_role",
@@ -6669,6 +6869,40 @@
           }
         ],
         "summary": "Get a role by ID",
+        "tags": [
+          "RBAC"
+        ]
+      },
+      "delete": {
+        "description": "Delete a role Handles `DELETE` requests for `/rbac/roles/{role_id}`. Requires bearer authentication.",
+        "operationId": "delete_role",
+        "parameters": [
+          {
+            "description": "Role ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Role deleted"
+          },
+          "404": {
+            "description": "Role not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a role",
         "tags": [
           "RBAC"
         ]
@@ -6772,53 +7006,6 @@
           }
         ]
       },
-      "post": {
-        "description": "Assign a permission to a role Handles `POST` requests for `/rbac/roles/{role_id}/permissions`. Requires bearer authentication.",
-        "operationId": "assign_permission_to_role",
-        "parameters": [
-          {
-            "description": "Role ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "role_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "permission_id": "66666666-6666-4666-8666-666666666666"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/AssignPermissionToRoleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Permission assigned"
-          },
-          "404": {
-            "description": "Role not found"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Assign a permission to a role",
-        "tags": [
-          "RBAC"
-        ]
-      },
       "get": {
         "description": "Get permissions assigned to a role Handles `GET` requests for `/rbac/roles/{role_id}/permissions`. Requires bearer authentication.",
         "operationId": "get_role_permissions",
@@ -6865,6 +7052,53 @@
           }
         ],
         "summary": "Get permissions assigned to a role",
+        "tags": [
+          "RBAC"
+        ]
+      },
+      "post": {
+        "description": "Assign a permission to a role Handles `POST` requests for `/rbac/roles/{role_id}/permissions`. Requires bearer authentication.",
+        "operationId": "assign_permission_to_role",
+        "parameters": [
+          {
+            "description": "Role ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "permission_id": "66666666-6666-4666-8666-666666666666"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/AssignPermissionToRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Permission assigned"
+          },
+          "404": {
+            "description": "Role not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Assign a permission to a role",
         "tags": [
           "RBAC"
         ]
@@ -7160,6 +7394,53 @@
           }
         ]
       },
+      "post": {
+        "description": "Grant a permission directly to a user Handles `POST` requests for `/rbac/users/{user_id}/permissions`. Requires bearer authentication.",
+        "operationId": "grant_permission_to_user",
+        "parameters": [
+          {
+            "description": "User ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "permission_id": "00000000-0000-0000-0000-000000000000",
+                "scope": {
+                  "project_id": "00000000-0000-0000-0000-000000000000"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/GrantPermissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Permission granted"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Grant a permission directly to a user",
+        "tags": [
+          "RBAC"
+        ]
+      },
       "get": {
         "description": "Get direct permissions granted to a user Handles `GET` requests for `/rbac/users/{user_id}/permissions`. Requires bearer authentication.",
         "operationId": "get_user_permissions",
@@ -7208,53 +7489,6 @@
           }
         ],
         "summary": "Get direct permissions granted to a user",
-        "tags": [
-          "RBAC"
-        ]
-      },
-      "post": {
-        "description": "Grant a permission directly to a user Handles `POST` requests for `/rbac/users/{user_id}/permissions`. Requires bearer authentication.",
-        "operationId": "grant_permission_to_user",
-        "parameters": [
-          {
-            "description": "User ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "permission_id": "00000000-0000-0000-0000-000000000000",
-                "scope": {
-                  "project_id": "00000000-0000-0000-0000-000000000000"
-                }
-              },
-              "schema": {
-                "$ref": "#/components/schemas/GrantPermissionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Permission granted"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Grant a permission directly to a user",
         "tags": [
           "RBAC"
         ]
@@ -7355,6 +7589,50 @@
           }
         ]
       },
+      "post": {
+        "description": "Assign a role to a user Handles `POST` requests for `/rbac/users/{user_id}/roles`. Requires bearer authentication.",
+        "operationId": "assign_role_to_user",
+        "parameters": [
+          {
+            "description": "User ID",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "role_id": "00000000-0000-0000-0000-000000000000"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/AssignRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Role assigned"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Assign a role to a user",
+        "tags": [
+          "RBAC"
+        ]
+      },
       "get": {
         "description": "Get roles assigned to a user Handles `GET` requests for `/rbac/users/{user_id}/roles`. Requires bearer authentication.",
         "operationId": "get_user_roles",
@@ -7401,50 +7679,6 @@
           }
         ],
         "summary": "Get roles assigned to a user",
-        "tags": [
-          "RBAC"
-        ]
-      },
-      "post": {
-        "description": "Assign a role to a user Handles `POST` requests for `/rbac/users/{user_id}/roles`. Requires bearer authentication.",
-        "operationId": "assign_role_to_user",
-        "parameters": [
-          {
-            "description": "User ID",
-            "example": "00000000-0000-0000-0000-000000000000",
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "role_id": "00000000-0000-0000-0000-000000000000"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/AssignRoleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Role assigned"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Assign a role to a user",
         "tags": [
           "RBAC"
         ]
@@ -7533,6 +7767,80 @@
         "summary": "Revoke a role from a user",
         "tags": [
           "RBAC"
+        ]
+      }
+    },
+    "/realtime/ws": {
+      "get": {
+        "tags": [
+          "Realtime"
+        ],
+        "summary": "Websocket Feed",
+        "description": "Websocket Feed Handles `GET` requests for `/realtime/ws`. Requires bearer authentication.",
+        "operationId": "websocket_feed",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "description": "Optional JWT bearer token query fallback for browser websocket clients. Authorization header remains supported.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebSocket upgrade endpoint"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "description": "Websocket Feed Handles `GET` requests for `/realtime/ws`. Requires bearer authentication.",
+        "operationId": "websocket_feed",
+        "parameters": [
+          {
+            "description": "Optional JWT bearer token query fallback for browser websocket clients. Authorization header remains supported.",
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebSocket upgrade endpoint"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Websocket Feed",
+        "tags": [
+          "Realtime"
         ]
       }
     },
@@ -8235,6 +8543,57 @@
           }
         ]
       },
+      "post": {
+        "description": "Creates a new user with password hash. Requires `user.manage` permission.",
+        "operationId": "create_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "email": "dev1@example.com",
+                "name": "Developer One",
+                "password": "SecurePassword123!"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created_at": "2025-01-15T10:00:00Z",
+                  "email": "ada@example.com",
+                  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                  "name": "Ada Lovelace",
+                  "provider": "local",
+                  "updated_at": "2025-01-15T10:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "User created"
+          },
+          "409": {
+            "description": "Email already in use"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a new user (admin)",
+        "tags": [
+          "Users"
+        ]
+      },
       "get": {
         "description": "Returns a paginated list of users, optionally filtered by name or email.\nAccessible only to admins or users with `user.view` permission.",
         "operationId": "list_users",
@@ -8314,57 +8673,6 @@
           }
         ],
         "summary": "List users (admin)",
-        "tags": [
-          "Users"
-        ]
-      },
-      "post": {
-        "description": "Creates a new user with password hash. Requires `user.manage` permission.",
-        "operationId": "create_user",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "email": "dev1@example.com",
-                "name": "Developer One",
-                "password": "SecurePassword123!"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/CreateUserRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "created_at": "2025-01-15T10:00:00Z",
-                  "email": "ada@example.com",
-                  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                  "name": "Ada Lovelace",
-                  "provider": "local",
-                  "updated_at": "2025-01-15T10:00:00Z"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            },
-            "description": "User created"
-          },
-          "409": {
-            "description": "Email already in use"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Create a new user (admin)",
         "tags": [
           "Users"
         ]
@@ -9086,6 +9394,22 @@
           }
         }
       },
+      "MarkNotificationsReadRequest": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "MessageResponse": {
         "type": "object",
         "required": [
@@ -9133,6 +9457,137 @@
             "items": {
               "$ref": "#/components/schemas/ResourceRoleRef"
             }
+          }
+        }
+      },
+      "Notification": {
+        "type": "object",
+        "required": [
+          "id",
+          "event_id",
+          "actor",
+          "entity_type",
+          "change_type",
+          "title",
+          "message",
+          "severity",
+          "occurred_at",
+          "unread",
+          "created_at"
+        ],
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/NotificationActor"
+          },
+          "change_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "entity_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "project_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "route": {
+            "type": "string",
+            "nullable": true
+          },
+          "severity": {
+            "$ref": "#/components/schemas/NotificationSeverity"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unread": {
+            "type": "boolean"
+          }
+        }
+      },
+      "NotificationActor": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "NotificationSeverity": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "important",
+          "noise"
+        ]
+      },
+      "NotificationUnreadCountResponse": {
+        "type": "object",
+        "required": [
+          "unread_count"
+        ],
+        "properties": {
+          "unread_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "NotificationsReadResponse": {
+        "type": "object",
+        "required": [
+          "updated",
+          "unread_count"
+        ],
+        "properties": {
+          "unread_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -9375,6 +9830,13 @@
             "nullable": true
           }
         }
+      },
+      "PresenceStatus": {
+        "type": "string",
+        "enum": [
+          "online",
+          "offline"
+        ]
       },
       "Progress": {
         "type": "object",
@@ -9741,6 +10203,280 @@
           "theme_color": {
             "type": "string",
             "example": "#2ecc71",
+            "nullable": true
+          }
+        }
+      },
+      "RealtimeActor": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "RealtimeClientCommand": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "project_ids",
+              "type"
+            ],
+            "properties": {
+              "project_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "route": {
+                "type": "string",
+                "nullable": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subscribe"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "project_ids",
+              "type"
+            ],
+            "properties": {
+              "project_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsubscribe"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ping"
+                ]
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "RealtimeErrorMessage": {
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "RealtimeEvent": {
+        "type": "object",
+        "required": [
+          "family",
+          "event_id",
+          "actor",
+          "entity_type",
+          "change_type",
+          "occurred_at"
+        ],
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/RealtimeActor"
+          },
+          "change_type": {
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "family": {
+            "$ref": "#/components/schemas/RealtimeEventFamily"
+          },
+          "metadata": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RealtimeEventMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "unread_count": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        }
+      },
+      "RealtimeEventFamily": {
+        "type": "string",
+        "enum": [
+          "notification",
+          "presence",
+          "data_changed"
+        ]
+      },
+      "RealtimeEventMetadata": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RealtimePresenceMetadata"
+          },
+          {
+            "$ref": "#/components/schemas/RealtimeNotificationCounterMetadata"
+          },
+          {
+            "$ref": "#/components/schemas/RealtimeInvalidateMetadata"
+          }
+        ]
+      },
+      "RealtimeInvalidateMetadata": {
+        "type": "object",
+        "required": [
+          "invalidate"
+        ],
+        "properties": {
+          "invalidate": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RealtimeNotificationCounterMetadata": {
+        "type": "object",
+        "required": [
+          "updated"
+        ],
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "RealtimePresenceMetadata": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "status",
+          "last_seen_at"
+        ],
+        "properties": {
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "project_snapshot": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RealtimePresenceUser"
+            },
+            "nullable": true
+          },
+          "route": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/PresenceStatus"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RealtimePresenceUser": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "name",
+          "status",
+          "last_seen_at"
+        ],
+        "properties": {
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/PresenceStatus"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RealtimeWsQuery": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "example": "<jwt-token>",
             "nullable": true
           }
         }
@@ -11352,6 +12088,14 @@
     {
       "name": "Progress",
       "description": "Task progress entries"
+    },
+    {
+      "name": "Notifications",
+      "description": "User notification endpoints"
+    },
+    {
+      "name": "Realtime",
+      "description": "WebSocket realtime feed"
     },
     {
       "name": "Telemetry",

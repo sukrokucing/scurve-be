@@ -1,25 +1,62 @@
 ---
 name: scurve-be
-description: Use this skill for backend work in the scurve-be repository (Rust + Axum + SQLite + RBAC + OpenAPI), especially when implementing or fixing endpoints, editing migrations, updating authorization or route-permission behavior, syncing OpenAPI or README examples, or running the repo's required validation and safety workflow. It provides the fast Docker loop, migration and DB safeguards, API-contract sync steps, and concise risk-aware handoff guidance.
+description: use this skill for backend work in the scurve-be repository (rust + axum + sqlite + rbac + openapi), especially when implementing or fixing endpoints, reviewing backend diffs or pull requests, editing migrations, updating authorization or route-permission behavior, syncing openapi or readme examples, or running the repo's validation and safety workflow. it provides the fast docker loop, migration and db safeguards, api-contract sync steps, and a structured review and self-review workflow that prioritizes purpose, edge cases, reliability, evidence, and concise risk-aware handoff.
 ---
 
-# S-Curve Backend Skill
+# S-Curve Backend
 
-## Use This Skill When
+## Overview
 
-- Implementing or fixing backend endpoints in `src/`
-- Editing SQL migrations in `migrations/`
-- Updating RBAC route-permission behavior
-- Changing API schemas/examples in OpenAPI or README docs
-- Running the quality/safety gate before handoff
+Work inside the `scurve-be` repo using repo conventions, Docker-based Rust tooling, migration safety rules, RBAC guardrails, and API contract discipline.
 
-## Repository Facts (Do Not Assume Otherwise)
+When the task is code review, diff review, or self-review before handoff, prioritize correctness and risk before style. Keep subjective feedback clearly non-blocking unless it violates an explicit repo convention or creates measurable risk.
+
+## Repository Facts
 
 - Primary runtime is Docker container `rust-service`.
 - Toolchain requirement is Rust `1.88.0` (not `1.87.0`).
 - API commonly runs on TLS `https://localhost:8800` when certs are configured.
 - SQLite DB is file-based (`scurve.sqlite`) and must be handled carefully.
 - Existing test suite is designed to avoid mutating the original DB by cloning to temp DBs.
+
+## Workflow
+
+1. Classify the request as one of:
+   - implementation or bug fix
+   - code review, diff review, or self-review
+   - migration or schema work
+   - RBAC, membership, or permission work
+   - API contract, OpenAPI, or README sync
+   - validation-only request
+2. For implementation-heavy tasks:
+   - decompose into endpoint logic, data model or migration impact, RBAC implications, API contract changes, and test coverage
+   - make changes in the smallest safe scope that solves the task
+   - run a self-review using the review order below before handoff
+3. For review-heavy tasks:
+   - use the review order below and focus first on blocking issues
+   - separate blocking findings from non-blocking suggestions
+   - avoid vague or taste-only comments
+4. For recurring review pain points, turn the pattern into an explicit convention in this skill or a reference file.
+
+## Review Order
+
+When reviewing code, PRs, diffs, tests, or your own changes before handoff, check in this order. For a deeper prompt list, use `references/review-checklist.md`.
+
+1. **Purpose** - Confirm the change solves the intended task, ticket, or user-visible behavior. If intent is unclear, infer it from ticket text, tests, README examples, OpenAPI, or surrounding code before judging implementation details.
+2. **Edge Cases** - Look for business and technical corner cases such as omitted requirements, boundary values, invalid inputs, nullability, partial failure behavior, impossible states, idempotency, race-like sequences, historical UUID TEXT/BLOB compatibility, and cross-user or cross-project scoping edge cases.
+3. **Reliability** - Check for security, performance, data integrity, transactional safety, broken integrations, auth leaks, cache invalidation, query inefficiency, input or output validation, and SQLite safety. Treat RBAC and membership checks as reliability issues, not optional polish.
+4. **Form** - Check whether the solution fits repo patterns and keeps acceptable cohesion and coupling. Prefer simple layering, explicit boundaries, and low-risk abstractions over cleverness.
+5. **Evidence** - Ensure tests and required validation support the change. Review tests with the same rigor as production code. If validation is skipped, say so explicitly and explain why.
+6. **Clarity** - Check whether names, file placement, error handling, API shape, and comments make intent easy to understand without reading every line. Prefer code that can be read diagonally.
+7. **Taste** - Treat personal preferences as non-blocking unless they are backed by repo conventions, measurable maintenance risk, or a clear team agreement.
+
+## Review Comment Rules
+
+- State what is wrong, why it matters, and a high-level fix or safer direction.
+- Avoid vague comments like `this is bad` or empty approvals like `LGTM`.
+- Mark findings by impact when useful: `blocking`, `important`, `non-blocking`, `nit`.
+- Do not block on taste-only feedback.
+- Prefer concrete references to files, queries, tests, or repo conventions.
 
 ## Reasoning and Response Policy
 
@@ -31,18 +68,26 @@ For complex backend tasks, use a lightweight structured reasoning loop before ma
 4. **Synthesize** the final answer or implementation plan by giving extra weight to the lowest-confidence or highest-risk areas.
 5. **Reflect** before handoff. If overall confidence is below `0.8`, identify the weakest assumption, re-check the relevant code, tests, or docs, and revise once before responding.
 
-For simple or localized tasks, skip the full loop and answer directly.
-
 Do not expose full internal chain-of-thought. When useful, provide a concise external summary with:
+
 - clear answer or implementation result
 - confidence level
 - key caveats, validation gaps, or remaining risks
 
 For implementation-heavy requests, prioritize:
+
 - what changed
 - files touched
 - tests and validation run
 - remaining caveats or follow-up risk
+
+For review-heavy requests, prioritize:
+
+- verdict or readiness
+- blocking issues first
+- non-blocking suggestions second
+- evidence or validation gaps
+- residual risk
 
 ## Fast Development Loop
 
@@ -82,7 +127,9 @@ make validate-no-smoke
 
 ## Required Quality Gate Before Handoff
 
-Run and pass:
+Before handoff or requesting peer review, run a self-review using the review order above.
+
+Run and pass when applicable:
 
 1. `make fmt`
 2. `make test`
@@ -92,10 +139,12 @@ Run and pass:
 
 If a step is skipped, explicitly state why.
 
+Prefer automated checks over manual style policing when a formatter, test, lint, or scripted validation can enforce the rule.
+
 ## Migration and DB Rules
 
 - Use migrations only; do not edit schema ad-hoc in production DB.
-- Validate migrations against a **dummy copied sqlite** first.
+- Validate migrations against a dummy copied sqlite first.
 - Keep compatibility for historical UUID storage differences (TEXT/BLOB) where relevant.
 - If migration changes endpoint behavior, add or update integration tests.
 
@@ -144,7 +193,7 @@ cargo run --bin dump_openapi -- --port 8800 --out openapi-live.json
 - Use `rg` for code search and `cargo test --test <name>` for focused loops.
 - Keep smoke checks deterministic and clean up test-created project data.
 
-## Context7 MCP Usage (Docs Lookup)
+## Context7 MCP Usage
 
 Use Context7 for external docs only for framework or library behavior. Prefer local source first for repo behavior.
 
@@ -169,13 +218,15 @@ When handing work back to the user, use this compact structure when relevant:
 1. **Answer / Result** - What was changed, decided, or recommended.
 2. **Confidence** - Overall confidence from `0.0-1.0`.
 3. **Validation** - Tests, checks, or commands run.
-4. **Key Caveats** - Remaining risks, skipped checks, or assumptions.
+4. **Review Findings** - For review tasks, list blocking issues first, then non-blocking suggestions.
+5. **Key Caveats** - Remaining risks, skipped checks, or assumptions.
 
-Keep the handoff concise. Prefer specifics over narration.
+Keep the handoff concise. Prefer specifics over narration. Do not use empty approvals without reasons.
 
 ## Completion Checklist
 
 - [ ] Build, test, audit, deny, and smoke done (or documented skip reason)
+- [ ] Self-review completed using the review order above
 - [ ] Migration safety validated (if schema touched)
 - [ ] OpenAPI and README synced (if API changed)
 - [ ] RBAC ownership and scoping validated (if auth or resource logic changed)

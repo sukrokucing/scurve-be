@@ -9,6 +9,7 @@ use tempfile::TempDir;
 const MUTABLE_TABLES: &[&str] = &[
     "activity_log",
     "event_store",
+    "notifications",
     "password_reset_tokens",
     "stale_important_logs",
     "stale_noise_logs",

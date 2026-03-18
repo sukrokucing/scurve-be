@@ -36,6 +36,7 @@ async fn setup() -> (Router, SqlitePool, String, support::db::TestDb) {
             exp_hours: 1,
         }),
         event_bus: tx,
+        realtime_hub: s_curve::realtime::RealtimeHub::new(),
         route_permission_cache: s_curve::authz::RoutePermissionCache::load(&pool)
             .await
             .unwrap(),

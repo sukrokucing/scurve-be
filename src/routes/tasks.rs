@@ -274,8 +274,14 @@ pub async fn create_task(
     let blocked_reason = normalize_optional_text(payload.blocked_reason.as_deref());
     let start_date = payload.start_date;
     let end_date = payload.end_date;
-    let baseline_start_at = payload.baseline_start_at;
-    let baseline_end_at = payload.baseline_end_at;
+    let due_date = payload.due_date;
+    let (baseline_start_at, baseline_end_at) = coalesce_baseline_window(
+        payload.baseline_start_at,
+        payload.baseline_end_at,
+        start_date,
+        end_date,
+        due_date,
+    );
     let task_weight = validate_task_weight(payload.task_weight.unwrap_or(1.0))?;
     validate_progress_payload(progress_method, payload.progress)?;
     let progress = payload.progress.unwrap_or(0);
@@ -312,7 +318,7 @@ pub async fn create_task(
         .bind(progress_method.as_str())
         .bind(blocked_flag)
         .bind(blocked_reason)
-        .bind(payload.due_date)
+        .bind(due_date)
         .bind(start_date)
         .bind(end_date)
         .bind(baseline_start_at)
@@ -451,6 +457,15 @@ pub async fn update_task(
             return Err(AppError::bad_request("end_date must be >= start_date"));
         }
     }
+    let (baseline_start_at, baseline_end_at) = coalesce_baseline_window(
+        task.baseline_start_at,
+        task.baseline_end_at,
+        task.start_date,
+        task.end_date,
+        task.due_date,
+    );
+    task.baseline_start_at = baseline_start_at;
+    task.baseline_end_at = baseline_end_at;
     validate_baseline(task.baseline_start_at, task.baseline_end_at)?;
 
     let now = utc_now();
@@ -564,10 +579,13 @@ pub async fn list_task_progress_components(
 pub async fn replace_task_progress_components(
     State(state): State<AppState>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Path((project_id, id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<ReplaceTaskProgressComponentsRequest>,
 ) -> AppResult<Json<Vec<TaskProgressComponent>>> {
     let task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let old_task =
+        task_metrics::build_task_response(&state.pool, project_id, task.clone(), utc_now()).await?;
     if task.progress_method != TaskProgressMethod::WeightedComponents {
         return Err(AppError::bad_request(
             "progress-components require progress_method=weighted_components",
@@ -686,7 +704,21 @@ pub async fn replace_task_progress_components(
 
     tx.commit().await?;
     task_metrics::refresh_task_snapshot(&state.pool, id).await?;
+    let refreshed_task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let task_dto =
+        task_metrics::build_task_response(&state.pool, project_id, refreshed_task, utc_now())
+            .await?;
     let components = task_metrics::load_task_progress_components(&state.pool, id).await?;
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "updated",
+        Some(auth.user_id),
+        &task_dto,
+        Some(&old_task),
+        Some(ctx),
+    );
     Ok(Json(components))
 }
 
@@ -1423,6 +1455,26 @@ fn validate_baseline(
         }
     }
     Ok(())
+}
+
+fn coalesce_baseline_window(
+    baseline_start_at: Option<DateTime<Utc>>,
+    baseline_end_at: Option<DateTime<Utc>>,
+    start_date: Option<DateTime<Utc>>,
+    end_date: Option<DateTime<Utc>>,
+    due_date: Option<DateTime<Utc>>,
+) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
+    if baseline_start_at.is_some() && baseline_end_at.is_some() {
+        return (baseline_start_at, baseline_end_at);
+    }
+
+    let derived_start = baseline_start_at.or(start_date);
+    let derived_end = baseline_end_at.or(end_date).or(due_date);
+
+    match (derived_start, derived_end) {
+        (Some(start), Some(end)) if end > start => (Some(start), Some(end)),
+        _ => (baseline_start_at, baseline_end_at),
+    }
 }
 
 fn validate_component_payloads(components: &[TaskProgressComponentInput]) -> AppResult<()> {

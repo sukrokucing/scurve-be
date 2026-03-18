@@ -9,6 +9,7 @@ pub mod errors;
 pub mod events;
 pub mod jwt;
 pub mod models;
+pub mod realtime;
 pub mod routes;
 pub mod task_metrics;
 pub mod utils;

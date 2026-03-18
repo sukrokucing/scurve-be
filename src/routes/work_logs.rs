@@ -44,7 +44,7 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StoredWorkLog {
     id: Uuid,
     project_id: Uuid,
@@ -127,6 +127,7 @@ pub async fn create_work_log(
     State(state): State<AppState>,
     Path((project_id, task_id)): Path<(Uuid, Uuid)>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<WorkLogCreateRequest>,
 ) -> AppResult<(StatusCode, Json<WorkLog>)> {
     ensure_task_access(&state, auth.user_id, project_id, task_id).await?;
@@ -217,7 +218,19 @@ pub async fn create_work_log(
         .await?;
 
     let created = fetch_work_log(&state, project_id, task_id, id).await?;
-    Ok((StatusCode::CREATED, Json(created.into())))
+    let created: WorkLog = created.into();
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "created",
+        Some(auth.user_id),
+        &created,
+        None,
+        Some(ctx),
+    );
+
+    Ok((StatusCode::CREATED, Json(created)))
 }
 
 #[utoipa::path(
@@ -237,11 +250,13 @@ pub async fn update_work_log(
     State(state): State<AppState>,
     Path((project_id, task_id, id)): Path<(Uuid, Uuid, Uuid)>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<WorkLogUpdateRequest>,
 ) -> AppResult<Json<WorkLog>> {
     ensure_task_access(&state, auth.user_id, project_id, task_id).await?;
 
     let mut row = fetch_work_log(&state, project_id, task_id, id).await?;
+    let old_item: WorkLog = row.clone().into();
 
     if row.user_id != Some(auth.user_id)
         && !has_project_update_permission(&state, auth.user_id, project_id).await?
@@ -319,7 +334,19 @@ pub async fn update_work_log(
         .await?;
 
     let updated = fetch_work_log(&state, project_id, task_id, id).await?;
-    Ok(Json(updated.into()))
+    let updated: WorkLog = updated.into();
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "updated",
+        Some(auth.user_id),
+        &updated,
+        Some(&old_item),
+        Some(ctx),
+    );
+
+    Ok(Json(updated))
 }
 
 #[utoipa::path(
@@ -338,10 +365,12 @@ pub async fn delete_work_log(
     State(state): State<AppState>,
     Path((project_id, task_id, id)): Path<(Uuid, Uuid, Uuid)>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
 ) -> AppResult<StatusCode> {
     ensure_task_access(&state, auth.user_id, project_id, task_id).await?;
 
     let row = fetch_work_log(&state, project_id, task_id, id).await?;
+    let old_item: WorkLog = row.clone().into();
     if row.user_id != Some(auth.user_id)
         && !has_project_update_permission(&state, auth.user_id, project_id).await?
     {
@@ -378,6 +407,20 @@ pub async fn delete_work_log(
     if affected.rows_affected() == 0 {
         return Err(AppError::not_found("work log not found"));
     }
+
+    let mut deleted_item = old_item.clone();
+    deleted_item.deleted_at = Some(now);
+    deleted_item.updated_at = now;
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    crate::events::log_activity_with_context(
+        &state.event_bus,
+        "deleted",
+        Some(auth.user_id),
+        &deleted_item,
+        Some(&old_item),
+        Some(ctx),
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }
