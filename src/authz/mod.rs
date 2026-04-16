@@ -39,9 +39,9 @@ impl AuthzMode {
                 .to_lowercase()
                 .as_str()
             {
+                "off" => AuthzMode::Off,
                 "advisory" => AuthzMode::Advisory,
-                "strict" => AuthzMode::Strict,
-                _ => AuthzMode::Off,
+                _ => AuthzMode::Strict,
             }
         })
     }

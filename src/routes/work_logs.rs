@@ -12,17 +12,7 @@ use crate::db::uuid_sql;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::work_log::{WorkLog, WorkLogCreateRequest, WorkLogSource, WorkLogUpdateRequest};
-use crate::utils::utc_now;
-
-fn parse_db_datetime(value: &str) -> AppResult<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
-        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
-    }
-    Err(AppError::internal(format!("invalid datetime: {}", value)))
-}
+use crate::utils::{parse_db_datetime, round2, utc_now};
 
 fn parse_work_date(value: Option<&str>) -> AppResult<String> {
     let Some(raw) = value else {
@@ -38,10 +28,6 @@ fn parse_work_date(value: Option<&str>) -> AppResult<String> {
     Err(AppError::bad_request(
         "work_date must be YYYY-MM-DD or RFC3339 timestamp",
     ))
-}
-
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
 }
 
 #[derive(Debug, Clone)]

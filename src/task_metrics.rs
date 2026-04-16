@@ -524,6 +524,5 @@ fn default_rule_set() -> EffectiveTaskHealthRuleSet {
     }
 }
 
-pub fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
+// Use the canonical round2 from utils
+pub use crate::utils::round2;

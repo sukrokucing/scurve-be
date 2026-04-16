@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::extract::State;
 use axum::Json;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -22,15 +22,7 @@ use crate::realtime::{
     notification_severity, notification_title, system_actor, user_can_view_project,
 };
 
-fn parse_db_datetime(value: &str) -> AppResult<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
-        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
-    }
-    Err(AppError::internal(format!("invalid datetime: {}", value)))
-}
+use crate::utils::parse_db_datetime;
 
 #[utoipa::path(
     get,

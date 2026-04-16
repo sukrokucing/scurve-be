@@ -1,7 +1,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -13,17 +12,7 @@ use crate::models::resource_role::{
     ProjectResourceRoleRate, ProjectResourceRoleRateUpsertRequest, ResourceRole,
     ResourceRoleCreateRequest, ResourceRoleUpdateRequest,
 };
-use crate::utils::utc_now;
-
-fn parse_db_datetime(value: &str) -> AppResult<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
-        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
-    }
-    Err(AppError::internal(format!("invalid datetime: {}", value)))
-}
+use crate::utils::{parse_db_datetime, utc_now};
 
 fn normalize_currency(raw: &str) -> AppResult<String> {
     let normalized = raw.trim().to_uppercase();

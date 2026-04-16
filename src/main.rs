@@ -2,7 +2,6 @@
 
 mod app;
 mod authz;
-#[path = "db/mod.rs"]
 mod db;
 mod docs;
 mod errors;
@@ -80,16 +79,27 @@ fn init_tracing() {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_thread_names(false);
-
     let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
-    tracing_subscriber::registry()
-        .with(filter_layer)
-        .with(fmt_layer)
-        .init();
+    let use_json = std::env::var("LOG_FORMAT")
+        .map(|v| v.to_ascii_lowercase() == "json")
+        .unwrap_or(false);
+
+    if use_json {
+        tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(tracing_subscriber::fmt::layer().json())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_target(false)
+                    .with_thread_ids(false)
+                    .with_thread_names(false),
+            )
+            .init();
+    }
 }

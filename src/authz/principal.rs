@@ -63,10 +63,11 @@ fn principal_cache() -> &'static RwLock<HashMap<Uuid, PrincipalCacheEntry>> {
 fn principal_cache_ttl() -> Duration {
     static TTL: OnceLock<Duration> = OnceLock::new();
     *TTL.get_or_init(|| {
+        // Default 30 000 ms (30 s). Set AUTHZ_PRINCIPAL_CACHE_MS=0 to disable caching.
         let ms = std::env::var("AUTHZ_PRINCIPAL_CACHE_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(0);
+            .unwrap_or(30_000);
         Duration::from_millis(ms)
     })
 }

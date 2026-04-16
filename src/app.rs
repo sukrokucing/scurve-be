@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post, put};
 use axum::Router;
 use sqlx::SqlitePool;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::AllowOrigin;
 use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 
@@ -118,10 +120,28 @@ impl tower_governor::key_extractor::KeyExtractor for SafeIpKeyExtractor {
 }
 
 pub fn api_routes(state: AppState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_methods(Any)
-        .allow_origin(Any)
-        .allow_headers(Any);
+    // Build CORS layer. Set CORS_ALLOWED_ORIGINS to a comma-separated list of origins to
+    // restrict cross-origin access (e.g. "https://app.example.com,https://admin.example.com").
+    // Leave unset (or set to "*") to allow all origins (suitable only for development).
+    let cors = {
+        let origins_env = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_default();
+        let trimmed = origins_env.trim();
+        if trimmed.is_empty() || trimmed == "*" {
+            CorsLayer::new()
+                .allow_methods(Any)
+                .allow_origin(Any)
+                .allow_headers(Any)
+        } else {
+            let allowed: Vec<axum::http::HeaderValue> = trimmed
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+            CorsLayer::new()
+                .allow_methods(Any)
+                .allow_origin(AllowOrigin::list(allowed))
+                .allow_headers(Any)
+        }
+    };
 
     let auth_routes = Router::new()
         .route("/register", post(auth::register))
@@ -302,6 +322,7 @@ pub fn api_routes(state: AppState) -> Router {
         // Merge protected routes
         .merge(protected_routes)
         .with_state(state)
+        .layer(DefaultBodyLimit::max(1_048_576)) // 1 MiB request body limit
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 

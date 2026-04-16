@@ -175,7 +175,15 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
     .ok()
     .flatten();
 
-    while let Ok(event) = rx.recv().await {
+    loop {
+        let event = match rx.recv().await {
+            Ok(event) => event,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(dropped = n, "activity listener lagged, dropped events");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        };
         // We clone the event to use it for properties JSON, while extracting fields for columns
         let event_json = event.clone();
 
@@ -291,5 +299,5 @@ pub async fn start_activity_listener(mut rx: broadcast::Receiver<Value>, pool: S
         } else {
             last_hash = Some(hash);
         }
-    }
+    } // end loop
 }

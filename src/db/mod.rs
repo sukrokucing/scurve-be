@@ -7,8 +7,10 @@ use sqlx::SqlitePool;
 pub async fn init() -> anyhow::Result<SqlitePool> {
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL not set")?;
 
+    // SQLite WAL serialises writers: a pool larger than ~5 connections wastes memory
+    // without improving throughput. Concurrent readers are handled fine with 5.
     let pool = SqlitePoolOptions::new()
-        .max_connections(10)
+        .max_connections(5)
         .min_connections(1)
         .acquire_timeout(Duration::from_secs(10))
         .after_connect(|conn, _meta| {

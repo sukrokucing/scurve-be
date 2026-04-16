@@ -170,26 +170,31 @@ pub struct ResetPasswordRequest {
 
 /// Request password reset
 ///
-/// Generates a password reset token and returns it. In production, this should send an email.
+/// Always returns 200 OK regardless of whether the email exists (prevents user enumeration).
+/// In production, send `raw_token` via email to the user; do not expose it in the response.
 #[utoipa::path(
     post,
     path = "/auth/forgot-password",
     tag = "Auth",
     request_body = ForgotPasswordRequest,
     responses(
-        (status = 200, description = "Reset token generated (for dev; in prod would send email)", body = MessageResponse),
-        (status = 404, description = "User not found")
+        (status = 200, description = "If that email is registered, a reset link has been sent", body = MessageResponse)
     )
 )]
 pub async fn forgot_password(
     State(state): State<AppState>,
     Json(payload): Json<ForgotPasswordRequest>,
-) -> impl axum::response::IntoResponse {
+) -> AppResult<Json<MessageResponse>> {
     use crate::utils::utc_now;
     use rand::Rng;
     use sha2::{Digest, Sha256};
 
-    // Find user by email
+    // Always return the same generic message — never reveal whether the email exists.
+    let generic_response = Json(MessageResponse {
+        message: "If that email is registered, a password reset link has been sent.".to_string(),
+    });
+
+    // Find user by email (silently ignore not-found)
     let user_row = sqlx::query("SELECT id FROM users WHERE email = ? AND deleted_at IS NULL")
         .bind(&payload.email)
         .fetch_optional(&state.pool)
@@ -197,7 +202,7 @@ pub async fn forgot_password(
 
     let user_row = match user_row {
         Some(row) => row,
-        None => return Err(AppError::not_found("User not found")),
+        None => return Ok(generic_response),
     };
 
     let user_id: String = sqlx::Row::get(&user_row, "id");
@@ -210,7 +215,7 @@ pub async fn forgot_password(
             .collect()
     };
 
-    // Hash the token for storage
+    // Hash the token for storage — never store or return the raw token
     let mut hasher = Sha256::new();
     hasher.update(raw_token.as_bytes());
     let token_hash = hex::encode(hasher.finalize());
@@ -230,13 +235,10 @@ pub async fn forgot_password(
     .execute(&state.pool)
     .await?;
 
-    // In production, send email with raw_token. For dev, return it directly.
-    Ok((
-        StatusCode::OK,
-        Json(MessageResponse {
-            message: format!("Reset token (dev only): {}", raw_token),
-        }),
-    ))
+    // TODO: send `raw_token` via email to the user. Do NOT return it in the HTTP response.
+    tracing::info!(user_id = %user_id, "Password reset token generated");
+
+    Ok(generic_response)
 }
 
 // --- Reset Password ---

@@ -32,7 +32,7 @@ use crate::models::task_health::{
     TaskHealthRule, TaskHealthRuleInput, TaskHealthRuleSetResponse, UpdateTaskHealthRulesRequest,
 };
 use crate::task_metrics;
-use crate::utils::utc_now;
+use crate::utils::{parse_db_datetime, round2, utc_now};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -152,25 +152,7 @@ pub async fn create_project(
         .clone()
         .unwrap_or_else(|| DEFAULT_THEME.to_string());
 
-    let match_user_id = uuid_sql::match_uuid_clause("id");
-    let insert_sql = format!(
-        "INSERT INTO projects (id, user_id, name, description, theme_color, created_at, updated_at) \
-         VALUES (?, (SELECT id FROM users WHERE {}), ?, ?, ?, ?, ?)",
-        match_user_id
-    );
-
-    sqlx::query(&insert_sql)
-        .bind(project_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(&payload.name)
-        .bind(&payload.description)
-        .bind(&theme_color)
-        .bind(now)
-        .bind(now)
-        .execute(&state.pool)
-        .await?;
-
+    // Resolve the owner role ID before opening the transaction (read-only from seed table).
     let owner_role_id: String = sqlx::query_scalar("SELECT id FROM roles WHERE name = ? LIMIT 1")
         .bind(PROJECT_OWNER_ROLE)
         .fetch_optional(&state.pool)
@@ -179,69 +161,92 @@ pub async fn create_project(
             AppError::internal("project_owner role not found; run latest migrations".to_string())
         })?;
 
-    let match_project = uuid_sql::match_uuid_clause("id");
-    let match_member_user = uuid_sql::match_uuid_clause("id");
-    let match_actor_user = uuid_sql::match_uuid_clause("id");
-    let membership_sql = format!(
-        "INSERT INTO project_members (id, project_id, user_id, access_role_id, created_at, created_by, updated_at, updated_by)
-         VALUES (
-            ?,
-            (SELECT id FROM projects WHERE {}),
-            (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
-            ?,
-            ?,
-            (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
-            ?,
-            (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
-         )",
-        match_project, match_member_user, match_actor_user, match_actor_user
-    );
-
+    // Wrap the three mutating INSERTs in a single transaction so no orphan rows are created.
     let membership_id = Uuid::new_v4();
-    sqlx::query(&membership_sql)
-        .bind(membership_id.to_string())
-        .bind(project_id.to_string())
-        .bind(project_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(owner_role_id)
-        .bind(now)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(now)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .execute(&state.pool)
-        .await?;
+    {
+        let mut tx = state.pool.begin().await?;
 
-    let actor_match = uuid_sql::match_uuid_clause("id");
-    let insert_member_role_sql = format!(
-        "INSERT INTO project_member_resource_roles (
-            id, membership_id, resource_role_id, created_at, created_by, updated_at, updated_by
-         ) VALUES (
-            ?,
-            ?,
-            ?,
-            ?,
-            (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
-            ?,
-            (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
-         )",
-        actor_match, actor_match
-    );
+        let match_user_id = uuid_sql::match_uuid_clause("id");
+        let insert_sql = format!(
+            "INSERT INTO projects (id, user_id, name, description, theme_color, created_at, updated_at) \
+             VALUES (?, (SELECT id FROM users WHERE {}), ?, ?, ?, ?, ?)",
+            match_user_id
+        );
+        sqlx::query(&insert_sql)
+            .bind(project_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(&payload.name)
+            .bind(&payload.description)
+            .bind(&theme_color)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
 
-    sqlx::query(&insert_member_role_sql)
-        .bind(Uuid::new_v4().to_string())
-        .bind(membership_id.to_string())
-        .bind(UNCLASSIFIED_RESOURCE_ROLE_ID)
-        .bind(now)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(now)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .execute(&state.pool)
-        .await?;
+        let match_project = uuid_sql::match_uuid_clause("id");
+        let match_member_user = uuid_sql::match_uuid_clause("id");
+        let match_actor_user = uuid_sql::match_uuid_clause("id");
+        let membership_sql = format!(
+            "INSERT INTO project_members (id, project_id, user_id, access_role_id, created_at, created_by, updated_at, updated_by)
+             VALUES (
+                ?,
+                (SELECT id FROM projects WHERE {}),
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                ?,
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+             )",
+            match_project, match_member_user, match_actor_user, match_actor_user
+        );
+        sqlx::query(&membership_sql)
+            .bind(membership_id.to_string())
+            .bind(project_id.to_string())
+            .bind(project_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(&owner_role_id)
+            .bind(now)
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(now)
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+        let actor_match = uuid_sql::match_uuid_clause("id");
+        let insert_member_role_sql = format!(
+            "INSERT INTO project_member_resource_roles (
+                id, membership_id, resource_role_id, created_at, created_by, updated_at, updated_by
+             ) VALUES (
+                ?,
+                ?,
+                ?,
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+             )",
+            actor_match, actor_match
+        );
+        sqlx::query(&insert_member_role_sql)
+            .bind(Uuid::new_v4().to_string())
+            .bind(membership_id.to_string())
+            .bind(UNCLASSIFIED_RESOURCE_ROLE_ID)
+            .bind(now)
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .bind(now)
+            .bind(auth.user_id.to_string())
+            .bind(auth.user_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+    }
 
     let project = fetch_project(&state.pool, auth.user_id, project_id).await?;
     let project: Project = project.try_into()?;
@@ -514,29 +519,39 @@ pub async fn get_project_dashboard(
     let project: Project = db_project.try_into()?;
     let metric = query.metric.unwrap_or(SCurveMetric::Progress);
 
-    // Keep legacy dashboard fields for backward compatibility when metric=progress.
-    let (plan, actual) = if metric == SCurveMetric::Progress {
-        (
-            fetch_progress_dashboard_plan(&state.pool, id).await?,
-            fetch_progress_dashboard_actual(&state.pool, id).await?,
-        )
-    } else {
-        (Vec::new(), Vec::new())
-    };
+    // Run all independent dashboard queries concurrently — SQLite WAL allows parallel reads.
+    let pool = &state.pool;
+    let (legacy_result, metric_plan, metric_actual, summary, meta, currency) = tokio::try_join!(
+        async {
+            // Keep legacy dashboard fields for backward compatibility when metric=progress.
+            if metric == SCurveMetric::Progress {
+                let (plan, actual) = tokio::try_join!(
+                    fetch_progress_dashboard_plan(pool, id),
+                    fetch_progress_dashboard_actual(pool, id)
+                )?;
+                Ok::<_, crate::errors::AppError>((plan, actual))
+            } else {
+                Ok((Vec::new(), Vec::new()))
+            }
+        },
+        fetch_dashboard_metric_plan_series(pool, id, metric),
+        fetch_dashboard_metric_actual_series(pool, id, metric),
+        fetch_dashboard_task_summary(pool, id),
+        dashboard_metric_metadata(pool, id, metric),
+        async {
+            match metric {
+                SCurveMetric::Cost => resolve_cost_currency(pool, id).await.map(Some),
+                _ => Ok(None),
+            }
+        },
+    )?;
 
-    let metric_plan = fetch_dashboard_metric_plan_series(&state.pool, id, metric).await?;
-    let metric_actual = fetch_dashboard_metric_actual_series(&state.pool, id, metric).await?;
-    let summary = fetch_dashboard_task_summary(&state.pool, id).await?;
+    let (plan, actual) = legacy_result;
+    let (planned_source, actual_source, unit) = meta;
     let data_status = if metric_plan.is_empty() || metric_actual.is_empty() {
         SCurveDataStatus::InsufficientData
     } else {
         SCurveDataStatus::Ok
-    };
-    let (planned_source, actual_source, unit) =
-        dashboard_metric_metadata(&state.pool, id, metric).await?;
-    let currency = match metric {
-        SCurveMetric::Cost => Some(resolve_cost_currency(&state.pool, id).await?),
-        _ => None,
     };
 
     let resp = DashboardResponse {
@@ -2858,10 +2873,6 @@ where
     }
 }
 
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
 fn metric_to_str(metric: SCurveMetric) -> &'static str {
     match metric {
         SCurveMetric::Progress => "progress",
@@ -2922,17 +2933,3 @@ async fn resolve_cost_currency(pool: &SqlitePool, project_id: Uuid) -> AppResult
     }
 }
 
-fn parse_db_datetime(value: &str) -> AppResult<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
-        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
-    }
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-        if let Some(naive) = date.and_hms_opt(0, 0, 0) {
-            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
-        }
-    }
-    Err(AppError::internal(format!("invalid datetime: {}", value)))
-}

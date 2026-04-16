@@ -41,3 +41,14 @@ pub fn utc_now() -> DateTime<Utc> {
 pub fn normalize_to_midnight(dt: DateTime<Utc>) -> DateTime<Utc> {
     dt.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()
 }
+
+/// Round a floating-point value to two decimal places.
+pub fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+/// Parse a datetime string from SQLite (RFC 3339 or SQLite text format).
+/// Canonical version — removes need for per-file duplicates.
+pub fn parse_db_datetime(value: &str) -> crate::errors::AppResult<DateTime<Utc>> {
+    crate::db::row_parsers::parse_datetime_value(value)
+}

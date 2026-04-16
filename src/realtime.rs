@@ -512,7 +512,15 @@ pub async fn start_realtime_dispatcher(
     hub: RealtimeHub,
 ) {
     tracing::info!("Realtime dispatcher started");
-    while let Ok(event) = rx.recv().await {
+    loop {
+        let event = match rx.recv().await {
+            Ok(event) => event,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(dropped = n, "realtime dispatcher lagged, dropped events");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        };
         match extract_project_change(&pool, &event).await {
             Ok(Some(change)) => {
                 if let Err(error) = dispatch_project_change(&pool, &hub, change).await {

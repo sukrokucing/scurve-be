@@ -2,14 +2,12 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use sqlx::Acquire;
-use tracing::error;
 
 use crate::app::AppState;
+use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 #[allow(unused_imports)]
-use crate::models::telemetry::{
-    TelemetryBatchRequest, TelemetryErrorResponse, TelemetryIngestResponse,
-};
+use crate::models::telemetry::{TelemetryBatchRequest, TelemetryIngestResponse};
 use crate::utils::utc_now;
 
 #[utoipa::path(
@@ -19,7 +17,7 @@ use crate::utils::utc_now;
     request_body = TelemetryBatchRequest,
     responses(
         (status = 202, description = "Accepted telemetry events", body = TelemetryIngestResponse),
-        (status = 400, description = "Invalid telemetry payload", body = TelemetryErrorResponse)
+        (status = 400, description = "Invalid telemetry payload")
     ),
     security(("bearerAuth" = []))
 )]
@@ -27,35 +25,36 @@ pub async fn ingest_events(
     State(state): State<AppState>,
     auth: AuthUser,
     Json(payload): Json<TelemetryBatchRequest>,
-) -> Result<(StatusCode, Json<TelemetryIngestResponse>), (StatusCode, Json<TelemetryErrorResponse>)>
-{
+) -> AppResult<(StatusCode, Json<TelemetryIngestResponse>)> {
     if payload.events.is_empty() || payload.events.len() > 20 {
-        return Err(invalid_payload());
+        return Err(AppError::bad_request("telemetry batch must have 1–20 events"));
     }
 
     for event in &payload.events {
         if event.event_id.trim().is_empty() {
-            return Err(invalid_payload());
+            return Err(AppError::bad_request("event_id must not be blank"));
         }
 
         if let Some(user_id) = event.user_id {
             if user_id != auth.user_id {
-                return Err(invalid_payload());
+                return Err(AppError::bad_request("user_id mismatch"));
             }
         }
 
         if event.duration_ms.unwrap_or(0) < 0 || event.intent_to_complete_ms.unwrap_or(0) < 0 {
-            return Err(invalid_payload());
+            return Err(AppError::bad_request(
+                "duration_ms and intent_to_complete_ms must be non-negative",
+            ));
         }
 
         if let Some(metadata) = &event.metadata {
             if !metadata.is_object() {
-                return Err(invalid_payload());
+                return Err(AppError::bad_request("metadata must be a JSON object"));
             }
         }
     }
 
-    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    let mut tx = state.pool.begin().await?;
     let mut accepted = 0usize;
 
     for event in payload.events {
@@ -84,35 +83,15 @@ pub async fn ingest_events(
         .bind(metadata)
         .bind(auth.user_id.to_string())
         .bind(now)
-        .execute(tx.acquire().await.map_err(internal_error)?)
-        .await
-        .map_err(internal_error)?;
+        .execute(tx.acquire().await?)
+        .await?;
 
         accepted += result.rows_affected() as usize;
     }
 
-    tx.commit().await.map_err(internal_error)?;
+    tx.commit().await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(TelemetryIngestResponse { accepted }),
     ))
-}
-
-fn invalid_payload() -> (StatusCode, Json<TelemetryErrorResponse>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(TelemetryErrorResponse {
-            message: "invalid telemetry payload".to_string(),
-        }),
-    )
-}
-
-fn internal_error(err: sqlx::Error) -> (StatusCode, Json<TelemetryErrorResponse>) {
-    error!(error = %err, "telemetry ingest failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(TelemetryErrorResponse {
-            message: "internal server error".to_string(),
-        }),
-    )
 }

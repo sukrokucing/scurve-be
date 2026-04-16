@@ -1112,36 +1112,31 @@ pub async fn batch_delete_tasks(
 
     let mut tx = state.pool.begin().await?;
     let now = utc_now();
-    let mut deleted = 0usize;
 
-    for id in ids {
-        let match_id = uuid_sql::match_uuid_clause("id");
-        let match_proj = uuid_sql::match_uuid_clause("project_id");
-        let sql = format!(
-            "UPDATE tasks
-             SET deleted_at = ?, updated_at = ?
-             WHERE {} AND {} AND deleted_at IS NULL",
-            match_id, match_proj
-        );
+    // Build a single UPDATE matching all requested IDs — one DB round-trip instead of N.
+    let id_clauses: Vec<String> = ids.iter().map(|_| uuid_sql::match_uuid_clause("id")).collect();
+    let match_proj = uuid_sql::match_uuid_clause("project_id");
+    let sql = format!(
+        "UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE ({}) AND {} AND deleted_at IS NULL",
+        id_clauses.join(" OR "),
+        match_proj
+    );
 
-        let affected = sqlx::query(&sql)
-            .bind(now)
-            .bind(now)
-            .bind(id.to_string())
-            .bind(id.to_string())
-            .bind(project_id.to_string())
-            .bind(project_id.to_string())
-            .execute(&mut *tx)
-            .await?;
+    let mut query = sqlx::query(&sql).bind(now).bind(now);
+    for id in &ids {
+        query = query.bind(id.to_string()).bind(id.to_string());
+    }
+    query = query
+        .bind(project_id.to_string())
+        .bind(project_id.to_string());
 
-        if affected.rows_affected() == 0 {
-            return Err(AppError::not_found(format!(
-                "task {} not found in project",
-                id
-            )));
-        }
+    let affected = query.execute(&mut *tx).await?;
+    let deleted = affected.rows_affected() as usize;
 
-        deleted += affected.rows_affected() as usize;
+    if deleted != ids.len() {
+        return Err(AppError::not_found(
+            "one or more tasks not found in project",
+        ));
     }
 
     tx.commit().await?;
