@@ -135,6 +135,123 @@ pub async fn me(State(state): State<AppState>, auth: AuthUser) -> AppResult<Json
     Ok(Json(user))
 }
 
+// --- Me Permissions ---
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProjectPermissionSummary {
+    pub project_id: uuid::Uuid,
+    pub project_name: String,
+    /// Sorted list of permission names the user holds for this project.
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MePermissionsResponse {
+    /// Global roles assigned to the user.
+    pub roles: Vec<String>,
+    /// Global permissions derived from roles and direct assignments.
+    pub permissions: Vec<String>,
+    /// Per-project permissions from project membership.
+    pub project_permissions: Vec<ProjectPermissionSummary>,
+}
+
+/// Get current user's roles and permissions
+///
+/// Returns the calling user's own roles, global permissions, and per-project
+/// permissions. No special RBAC permission required — every authenticated user
+/// may call this for themselves. Use this to drive UI visibility (show/hide buttons).
+#[utoipa::path(
+    get,
+    path = "/auth/me/permissions",
+    tag = "Auth",
+    responses(
+        (status = 200, description = "Roles and permissions for the current user", body = MePermissionsResponse)
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn me_permissions(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> AppResult<Json<MePermissionsResponse>> {
+    use crate::authz::Principal;
+    use crate::db::uuid_sql;
+    use sqlx::Row;
+    use std::collections::HashMap;
+
+    let principal = Principal::load(auth.user_id, &state.pool)
+        .await
+        .map_err(|e| AppError::internal(format!("Failed to load principal: {}", e)))?;
+
+    // Group scoped permissions by project_id
+    let mut project_perm_map: HashMap<String, Vec<String>> = HashMap::new();
+    for (perm_name, scope) in &principal.scoped_permissions {
+        if let Some(project_id) = scope.get("project_id").and_then(|v| v.as_str()) {
+            project_perm_map
+                .entry(project_id.to_string())
+                .or_default()
+                .push(perm_name.clone());
+        }
+    }
+
+    // Fetch project names for all referenced project IDs in one query
+    let project_permissions = if project_perm_map.is_empty() {
+        vec![]
+    } else {
+        let project_ids: Vec<String> = project_perm_map.keys().cloned().collect();
+
+        let id_case = uuid_sql::case_uuid("id");
+        let where_parts: Vec<String> = project_ids
+            .iter()
+            .map(|_| format!("({})", uuid_sql::match_uuid_clause("id")))
+            .collect();
+        let sql = format!(
+            "SELECT {}, name FROM projects WHERE ({}) AND deleted_at IS NULL",
+            id_case,
+            where_parts.join(" OR ")
+        );
+
+        let mut query = sqlx::query(&sql);
+        for id in &project_ids {
+            // match_uuid_clause requires two binds per column (blob + text)
+            query = query.bind(id.as_str()).bind(id.as_str());
+        }
+
+        let rows = query.fetch_all(&state.pool).await?;
+
+        let mut result: Vec<ProjectPermissionSummary> = rows
+            .iter()
+            .filter_map(|row| {
+                let id_str: String = row.get("id");
+                let name: String = row.get("name");
+                let perms = project_perm_map.get(&id_str)?;
+                let project_id = uuid::Uuid::parse_str(&id_str).ok()?;
+                let mut sorted_perms = perms.clone();
+                sorted_perms.sort();
+                Some(ProjectPermissionSummary {
+                    project_id,
+                    project_name: name,
+                    permissions: sorted_perms,
+                })
+            })
+            .collect();
+
+        result.sort_by(|a, b| a.project_name.cmp(&b.project_name));
+        result
+    };
+
+    let mut roles: Vec<String> = principal.roles.into_iter().collect();
+    roles.sort();
+
+    let mut permissions: Vec<String> = principal.permissions.into_iter().collect();
+    permissions.sort();
+
+    Ok(Json(MePermissionsResponse {
+        roles,
+        permissions,
+        project_permissions,
+    }))
+}
+
 #[utoipa::path(
     post,
     path = "/auth/logout",

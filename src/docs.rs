@@ -85,6 +85,8 @@ use crate::models;
 			crate::routes::auth::ForgotPasswordRequest,
 			crate::routes::auth::ResetPasswordRequest,
 			crate::routes::auth::MessageResponse,
+			crate::routes::auth::MePermissionsResponse,
+			crate::routes::auth::ProjectPermissionSummary,
 			crate::models::audit_log::AuditLogEntry,
 			crate::models::audit_log::PaginatedAuditLogs,
 			crate::models::telemetry::TelemetryEventName,
@@ -123,6 +125,7 @@ use crate::models;
 		crate::routes::auth::register,
 		crate::routes::auth::login,
 		crate::routes::auth::me,
+		crate::routes::auth::me_permissions,
 		crate::routes::auth::logout,
 		crate::routes::auth::forgot_password,
 		crate::routes::auth::reset_password,
@@ -835,6 +838,15 @@ fn apply_response_examples(operation: &mut Value) {
                         "total": 1,
                         "page": 1,
                         "per_page": 20
+                    })),
+                    "#/components/schemas/MePermissionsResponse" => Some(json!({
+                        "roles": ["viewer"],
+                        "permissions": ["project.view", "progress.view", "task.view"],
+                        "project_permissions": [{
+                            "project_id": "44444444-4444-4444-8444-444444444444",
+                            "project_name": "Launch Planning",
+                            "permissions": ["progress.view", "project.view", "task.view"]
+                        }]
                     })),
                     "#/components/schemas/MessageResponse" => {
                         Some(json!({ "message": "Operation successful" }))

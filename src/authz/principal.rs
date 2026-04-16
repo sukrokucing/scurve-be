@@ -241,6 +241,62 @@ impl Principal {
         })
     }
 
+    /// Load a synthetic Principal for "view-as" mode.
+    ///
+    /// The returned principal carries the real admin's `user_id` but has only the
+    /// roles and global permissions of the named role. Scoped (project-level)
+    /// permissions are not simulated — view-as is a global role simulation.
+    ///
+    /// This function never reads from or writes to the principal cache.
+    pub async fn load_for_role(
+        admin_user_id: Uuid,
+        role_name: &str,
+        pool: &SqlitePool,
+    ) -> Result<Self, sqlx::Error> {
+        // Look up the role by name
+        let role_row = sqlx::query("SELECT id FROM roles WHERE name = ?")
+            .bind(role_name)
+            .fetch_optional(pool)
+            .await?;
+
+        let role_row = match role_row {
+            Some(r) => r,
+            None => {
+                // Unknown role — return empty principal so the caller can warn and fall back
+                return Ok(Self {
+                    user_id: admin_user_id,
+                    roles: HashSet::new(),
+                    permissions: HashSet::new(),
+                    scoped_permissions: Vec::new(),
+                });
+            }
+        };
+
+        let role_id: String = role_row.get("id");
+
+        // Load global permissions for this role
+        let perm_rows = sqlx::query(
+            r#"
+            SELECT p.name
+            FROM permissions p
+            INNER JOIN role_permissions rp ON p.id = rp.permission_id
+            WHERE rp.role_id = ?
+            "#,
+        )
+        .bind(&role_id)
+        .fetch_all(pool)
+        .await?;
+
+        let permissions: HashSet<String> = perm_rows.iter().map(|r| r.get("name")).collect();
+
+        Ok(Self {
+            user_id: admin_user_id,
+            roles: std::iter::once(role_name.to_string()).collect(),
+            permissions,
+            scoped_permissions: Vec::new(),
+        })
+    }
+
     #[allow(dead_code)]
     pub fn invalidate_cache_for(user_id: Uuid) {
         if let Ok(mut cache) = principal_cache().write() {

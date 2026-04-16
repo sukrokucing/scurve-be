@@ -147,6 +147,7 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/register", post(auth::register))
         .route("/login", post(auth::login))
         .route("/me", get(auth::me))
+        .route("/me/permissions", get(auth::me_permissions))
         .route("/logout", post(auth::logout))
         .route("/forgot-password", post(auth::forgot_password))
         .route("/reset-password", post(auth::reset_password));
