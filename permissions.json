@@ -20,5 +20,9 @@
   { "name": "PERMISSION_VIEW", "value": "permission.view" },
   { "name": "PERMISSION_MANAGE", "value": "permission.manage" },
 
-  { "name": "TELEMETRY_INGEST", "value": "telemetry.ingest" }
+  { "name": "TELEMETRY_INGEST", "value": "telemetry.ingest" },
+
+  { "name": "MENU_VIEW", "value": "menu.view" },
+
+  { "name": "TASK_HISTORY", "value": "task.history" }
 ]

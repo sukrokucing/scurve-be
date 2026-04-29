@@ -12,6 +12,7 @@ use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::authz::{resolve_data_user, ViewAsContext};
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::dependency::{DependencyCreateRequest, TaskDependency};
@@ -99,14 +100,16 @@ pub async fn list_tasks(
     Path(project_id): Path<Uuid>,
     Query(query): Query<TaskListQuery>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<(HeaderMap, Json<Vec<Task>>)> {
+    let effective_user_id = resolve_data_user(&view_as, auth.user_id);
     // If caller requested progress via query param, return progress entries instead
     if query.progress.unwrap_or(false) {
         // verify project membership
-        ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+        ensure_project_membership(&state.pool, effective_user_id, project_id).await?;
         if let Some(task_id) = query.task_id {
             // Keep legacy behavior: validate the referenced task belongs to the project.
-            let _ = fetch_task(&state.pool, auth.user_id, project_id, task_id).await?;
+            let _ = fetch_task(&state.pool, effective_user_id, project_id, task_id).await?;
         }
 
         // Convert to Progress and then to Task-like JSON via serde Value? We will return empty Vec<Task> to satisfy signature
@@ -121,7 +124,7 @@ pub async fn list_tasks(
         return Ok((headers, Json(tasks)));
     }
 
-    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+    ensure_project_membership(&state.pool, effective_user_id, project_id).await?;
 
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).clamp(1, 100);
@@ -376,6 +379,7 @@ pub async fn update_task(
     let old_dto =
         task_metrics::build_task_response(&state.pool, project_id, old_task.clone(), utc_now())
             .await?;
+    let old_progress = old_task.progress;
 
     let mut task = old_task;
 
@@ -511,6 +515,23 @@ pub async fn update_task(
     let task_dto =
         task_metrics::build_task_response(&state.pool, project_id, task.clone(), now).await?;
 
+    // Auto-log cost when progress moves forward
+    if let Err(e) = crate::routes::work_logs::auto_log_progress_cost(
+        &state.pool,
+        project_id,
+        task_dto.id,
+        task_dto.assignee,
+        old_progress,
+        task_dto.progress,
+        task_dto.duration_days,
+        auth.user_id,
+        now,
+    )
+    .await
+    {
+        tracing::warn!(task_id = %task_dto.id, error = %e, "auto progress cost log failed");
+    }
+
     // Log activity with old/new tracking and request context
     let ctx = crate::events::RequestContext::from_headers(&headers);
     crate::events::log_activity_with_context(
@@ -536,9 +557,10 @@ pub async fn update_task(
 pub async fn get_task(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path((project_id, id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<Task>> {
-    let task = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let task = fetch_task(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id, id).await?;
     let task = task_metrics::build_task_response(&state.pool, project_id, task, utc_now()).await?;
     Ok(Json(task))
 }
@@ -557,9 +579,10 @@ pub async fn get_task(
 pub async fn list_task_progress_components(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path((project_id, id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<Vec<TaskProgressComponent>>> {
-    let _ = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let _ = fetch_task(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id, id).await?;
     let components = task_metrics::load_task_progress_components(&state.pool, id).await?;
     Ok(Json(components))
 }
@@ -774,8 +797,9 @@ pub async fn list_project_assignees(
     State(state): State<AppState>,
     Path(project_id): Path<Uuid>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<TaskAssignee>>> {
-    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+    ensure_project_membership(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id).await?;
 
     let assignee_case = uuid_sql::case_uuid("t.assignee");
     let user_id_case = uuid_sql::case_uuid("u.id");
@@ -827,9 +851,10 @@ pub async fn list_project_assignees(
 pub async fn list_task_activity(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path((project_id, id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<Vec<TaskActivityEntry>>> {
-    let _ = fetch_task(&state.pool, auth.user_id, project_id, id).await?;
+    let _ = fetch_task(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id, id).await?;
 
     let match_subject = uuid_sql::match_uuid_clause("subject_id");
     let sql = format!(
@@ -889,8 +914,9 @@ pub async fn list_dependencies(
     State(state): State<AppState>,
     Path(project_id): Path<Uuid>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<TaskDependency>>> {
-    ensure_project_membership(&state.pool, auth.user_id, project_id).await?;
+    ensure_project_membership(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id).await?;
 
     // Use a defensive manual SELECT that textifies UUIDs and parses rows explicitly.
     let id_case = uuid_sql::case_uuid("d.id");
@@ -1162,7 +1188,9 @@ pub async fn batch_update_tasks(
 
     let mut tx = state.pool.begin().await?;
     let now = utc_now();
-    let mut updated_ids = Vec::new();
+    let mut updated_ids: Vec<Uuid> = Vec::new();
+    // Track old progress per task so we can auto-log after commit
+    let mut old_progress_map: Vec<(Uuid, i32)> = Vec::new();
 
     for update in payload.tasks {
         // Verify task belongs to project
@@ -1289,6 +1317,7 @@ pub async fn batch_update_tasks(
             .await?;
 
         updated_ids.push(update.id);
+        old_progress_map.push((update.id, current.progress));
     }
 
     tx.commit().await?;
@@ -1322,6 +1351,27 @@ pub async fn batch_update_tasks(
 
     let tasks =
         task_metrics::build_task_responses(&state.pool, project_id, tasks_db, utc_now()).await?;
+
+    // Auto-log cost for any tasks where progress moved forward
+    for task in &tasks {
+        if let Some(&(_, old_progress)) = old_progress_map.iter().find(|(id, _)| *id == task.id) {
+            if let Err(e) = crate::routes::work_logs::auto_log_progress_cost(
+                &state.pool,
+                project_id,
+                task.id,
+                task.assignee,
+                old_progress,
+                task.progress,
+                task.duration_days,
+                auth.user_id,
+                now,
+            )
+            .await
+            {
+                tracing::warn!(task_id = %task.id, error = %e, "batch auto progress cost log failed");
+            }
+        }
+    }
 
     Ok(Json(tasks))
 }

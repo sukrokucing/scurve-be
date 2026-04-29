@@ -62,7 +62,7 @@ async fn test_critical_path_basic() -> anyhow::Result<()> {
 
     // Call critical path endpoint
     let path = AxPath(project_id);
-    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), path).await?;
+    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), None, path).await?;
     let ids = res.0.task_ids;
 
     // Expect critical path A -> B -> C

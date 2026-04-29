@@ -1,66 +1,38 @@
 # s-curve
 
-Modular Axum backend for project/task management with JWT auth, SQLite (SQLx), RBAC, and OpenAPI/Swagger.
+Modular Axum backend for project/task S-curve management. Rust 1.88, Axum 0.7, SQLite (SQLx 0.8), JWT, RBAC.
 
 ## What You Get
 
 - Axum 0.7 API with tracing, CORS, and rate limiting
 - SQLite persistence with SQLx migrations
 - JWT auth + Argon2 password hashing
-- RBAC with route-permission mapping
+- Role-Based Access Control (RBAC) with per-route permission mapping
+- RBAC-filtered navigation menus with ETag caching (`GET /menus`)
+- Admin view-as (`X-View-As-User`, `X-View-As-Role` headers)
+- Self-service permissions endpoint (`GET /auth/me/permissions`)
 - OpenAPI at `/api-docs/openapi.json` and Swagger UI at `/docs`
-- Migration CLI (`cargo run --bin cli -- ...`)
-
-## Quick Start (Local)
-
-```bash
-# from repository root
-# create .env once (if you don't have it yet)
-cp .env.example .env
-
-# run API (applies migrations on startup)
-# faster compile/startup for daily development
-cargo run --profile local-release
-
-# production-like build profile
-cargo run --release
-```
-
-Open:
-
-- `http://localhost:<APP_PORT>/docs` (HTTP mode)
-- `https://localhost:<APP_PORT>/docs` (when `CERT_PATH` and `KEY_PATH` are set)
-
-Notes:
-
-- Code fallback default is `APP_PORT=8000`.
-- This repository's `.env` currently sets `APP_PORT=8800`.
+- Migration CLI (`make migrate`, `make migrate-status`)
 
 ## Quick Start (Docker: `rust-service`)
 
-The `rust-service` container is usually idle (`tail -f /dev/null`), so run commands via `docker exec`.
+The `rust-service` container is usually idle (`tail -f /dev/null`), so run commands via `make` (or `docker exec` directly).
 
 ```bash
 # 1) ensure db file exists and is writable
-docker exec rust-service sh -lc 'touch /apps/scurve-be/scurve.sqlite && chmod 664 /apps/scurve-be/scurve.sqlite'
+docker exec rust-service sh -c 'touch /apps/scurve-be/scurve.sqlite && chmod 664 /apps/scurve-be/scurve.sqlite'
 
 # 2) run migrations
-docker exec rust-service cargo +1.88.0 run \
-  --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target \
-  --release --bin cli -- migrate-run
+make migrate
 
-# 3) start API (TLS enabled with mounted certs)
-docker exec rust-service env RUST_BACKTRACE=1 \
-  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
-  cargo +1.88.0 run --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target --profile local-release
+# 3) start API (local-release profile — fast recompile, TLS enabled)
+make run
 
-# 4) optional production-like startup
-docker exec rust-service env RUST_BACKTRACE=1 \
-  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
-  cargo +1.88.0 run --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target --release
+# 4) or regenerate openapi.json first, then start
+make run-openapi
+
+# 5) production-like build (staging profile: opt-level=2, no LTO — faster than --release)
+make run-release
 ```
 
 Health check:
@@ -71,39 +43,8 @@ curl -sk https://localhost:8800/api/health
 
 Important:
 
-- Prefer `docker exec rust-service cargo ...` over `docker exec ... sh -lc 'cargo ...'`.
-- In this container, `sh -lc` may not include Cargo in `PATH`.
+- Do not wrap with `sh -lc`; run Cargo directly via `docker exec rust-service cargo ...` (Cargo may not be in PATH via login shell).
 - Current dependency graph requires Rust 1.88 (`time` crate). Use `cargo +1.88.0 ...` in the container.
-
-### Faster Docker compile/restart
-
-If you restart the API frequently, compile once and run the binary directly:
-
-```bash
-# compile once
-docker exec rust-service cargo +1.88.0 build \
-  --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target \
-  --profile local-release
-
-# start without invoking Cargo
-docker exec rust-service env RUST_BACKTRACE=1 \
-  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
-  /apps/scurve-be/target/local-release/s-curve
-```
-
-Production-like variant:
-
-```bash
-docker exec rust-service cargo +1.88.0 build \
-  --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target \
-  --release
-
-docker exec rust-service env RUST_BACKTRACE=1 \
-  CERT_PATH=/apps/certs/cert.pem KEY_PATH=/apps/certs/key.pem \
-  /apps/scurve-be/target/release/s-curve
-```
 
 ## Configuration
 
@@ -122,49 +63,53 @@ Container default used in this repo:
 DATABASE_URL=sqlite:///apps/scurve-be/scurve.sqlite
 ```
 
-Common optional variables:
+Full variable reference:
 
-- `CERT_PATH`, `KEY_PATH`: enable TLS (and browser HTTP/2 via ALPN)
-- `AUTHZ_MODE`: `off` | `advisory` | `strict`
-- `AUTHZ_PRINCIPAL_CACHE_MS`: in-memory principal cache TTL in milliseconds (default `0`, disabled)
-- `UUID_TEXT_FAST_PATH`: `true|false` fast UUID predicate mode; enable only after UUID canonicalization migration
-- `SCURVE_COST_CURRENCY`: fallback ISO currency code for cost metrics (default `USD`)
-- `SHOW_ERRORS`: include debug detail in error payloads when `true`/`1`
-- `AUTH_RATE_PER_SECOND`, `AUTH_BURST_SIZE`
-- `GLOBAL_RATE_PER_SECOND`, `GLOBAL_BURST_SIZE`
+| Variable | Default | Notes |
+|---|---|---|
+| `DATABASE_URL` | — | Required |
+| `JWT_SECRET` | — | Required |
+| `JWT_EXP_HOURS` | — | Required |
+| `APP_PORT` | `8000` | `8800` in repo `.env` |
+| `AUTHZ_MODE` | `strict` | `off` / `advisory` / `strict` |
+| `AUTHZ_PRINCIPAL_CACHE_MS` | `30000` | In-memory principal cache TTL (ms). `0` = disabled |
+| `UUID_TEXT_FAST_PATH` | `false` | Enable after UUID canonicalization migration |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated origins for production |
+| `LOG_FORMAT` | `human` | `json` for structured log aggregators |
+| `SHOW_ERRORS` | `0` | `1` = include debug detail in error responses |
+| `SCURVE_COST_CURRENCY` | `USD` | Fallback ISO currency code |
+| `WORKING_HOURS_PER_DAY` | `8` | Hours per calendar day used for auto progress cost calculation |
+| `CERT_PATH` / `KEY_PATH` | — | Enable TLS |
+| `AUTH_RATE_PER_SECOND` / `AUTH_BURST_SIZE` | `2` / `5` | Auth route rate limit |
+| `GLOBAL_RATE_PER_SECOND` / `GLOBAL_BURST_SIZE` | `50` / `100` | Global rate limit |
 
 ## Migrations CLI
 
 ```bash
-# create migration template
-cargo run --bin cli -- make-migration add_labels_to_tasks
-
-# apply pending migrations
-cargo run --bin cli -- migrate-run
-
-# compare applied vs pending
-cargo run --bin cli -- migrate-status
-
-# rollback last migration
-cargo run --bin cli -- migrate-rollback
+make migrate                # apply pending migrations (Docker)
+make migrate-status         # compare applied vs pending (Docker)
 ```
 
-Migrations are stored in `migrations/`.
+For additional operations (create template, rollback) run the CLI directly:
+
+```bash
+docker exec -w /apps/scurve-be rust-service cargo +1.88.0 run \
+  --manifest-path /apps/scurve-be/Cargo.toml \
+  --target-dir /apps/scurve-be/target \
+  --release --bin cli -- make-migration <name>
+
+docker exec -w /apps/scurve-be rust-service cargo +1.88.0 run \
+  --manifest-path /apps/scurve-be/Cargo.toml \
+  --target-dir /apps/scurve-be/target \
+  --release --bin cli -- migrate-rollback
+```
+
+Migrations are stored in `migrations/`. Always add partial indexes `WHERE deleted_at IS NULL` for soft-delete columns.
 
 ## API Docs
 
 - Swagger UI: `/docs`
 - OpenAPI JSON: `/api-docs/openapi.json`
-
-Regenerate committed OpenAPI files:
-
-```bash
-# canonical repo snapshot
-cargo run --bin dump_openapi -- --port 8000 --out openapi.json
-
-# local/live-style snapshot (matches current .env APP_PORT)
-cargo run --bin dump_openapi -- --port 8800 --out openapi-live.json
-```
 
 Auth flow in Swagger:
 
@@ -173,221 +118,343 @@ Auth flow in Swagger:
 3. Paste `Bearer <token>`
 4. Execute protected endpoints
 
+Regenerate `openapi.json`:
+
+```bash
+make openapi                # writes openapi.json at repo root
+make run-openapi            # regenerate then start server in one step
+```
+
 ## Endpoint Snapshot
 
-| Method | Path | Auth | Purpose |
-| ------ | ---- | ---- | ------- |
-| POST | `/auth/register` | No | Register user |
-| POST | `/auth/login` | No | Login and get JWT |
-| GET | `/auth/me` | Yes | Current user |
-| POST | `/auth/logout` | Yes | Stateless logout acknowledgement |
-| POST | `/auth/forgot-password` | No | Request reset token |
-| POST | `/auth/reset-password` | No | Reset password |
-| GET/POST | `/projects` | Yes | List/create projects |
-| GET/PUT/DELETE | `/projects/{id}` | Yes | Read/update/delete project |
-| GET | `/projects/{project_id}/members` | Yes | List active project members + `access_role` + `resource_roles[]` |
-| POST | `/projects/{project_id}/members` | Yes | Add/update project member (`access_role_id`, `resource_role_ids[]`) |
-| DELETE | `/projects/{project_id}/members/{user_id}` | Yes | Soft-delete project membership |
-| GET | `/resource-roles` | Yes | List global resource role catalog |
-| POST | `/resource-roles` | Yes | Create global resource role |
-| PUT/DELETE | `/resource-roles/{id}` | Yes | Update/soft-delete global resource role |
-| GET | `/projects/{project_id}/resource-roles` | Yes | List effective resource roles + project override rates |
-| PUT/DELETE | `/projects/{project_id}/resource-roles/{resource_role_id}/rate` | Yes | Upsert/soft-delete project rate override |
-| GET/POST | `/projects/{project_id}/tasks` | Yes | List/create tasks |
-| DELETE | `/projects/{project_id}/tasks/batch` | Yes | Soft-delete multiple tasks atomically |
-| PUT/DELETE | `/projects/{project_id}/tasks/{id}` | Yes | Update/delete task |
-| GET | `/projects/{project_id}/tasks/{id}/activity` | Yes | Task activity timeline |
-| GET/PUT | `/projects/{project_id}/tasks/{id}/progress-components` | Yes | List/replace weighted progress components for `weighted_components` tasks |
-| GET | `/projects/{project_id}/assignees` | Yes | List distinct assignees used in project tasks |
-| GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | List/create progress |
-| PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | Update/delete progress |
-| GET/POST | `/projects/{project_id}/tasks/{task_id}/work-logs` | Yes | List/create economic work logs |
-| PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/work-logs/{id}` | Yes | Update/soft-delete work log |
-| GET | `/tasks/{task_id}/progress` | Yes | Legacy compatibility lookup by task id |
-| GET | `/users/me/projects` | Yes | My accessible projects + effective scoped permissions |
-| GET/PUT | `/projects/{project_id}/task-health/rules` | Yes | Read/update effective project task-health thresholds |
-| GET | `/projects/{id}/dashboard` | Yes | Dashboard payload with metric series (`metric=progress|hours|cost`) plus task summary aggregates |
-| GET | `/projects/{id}/s-curve/health` | Yes | S-curve health (`metric=progress|hours|cost`) |
-| GET | `/portfolio/s-curve/summary` | Yes | Portfolio-level S-curve summary |
-| GET | `/notifications` | Yes | Visible durable notifications for the current user |
-| GET | `/notifications/unread-count` | Yes | Visible unread notification count |
-| POST | `/notifications/read` | Yes | Mark selected notifications as read |
-| POST | `/notifications/read-all` | Yes | Mark all visible notifications as read |
-| GET | `/realtime/ws` | Yes | WebSocket feed for notifications, presence, and project invalidation signals |
-| POST | `/telemetry/events` | Yes | Ingest frontend telemetry batch (idempotent by `event_id`) |
-| GET/POST/DELETE | `/rbac/...` | Yes | RBAC administration |
+### Auth
 
-### Task List Query (`GET /projects/{project_id}/tasks`)
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| POST | `/auth/register` | No | — | Register user |
+| POST | `/auth/login` | No | — | Login, get JWT |
+| GET | `/auth/me` | Yes | — | Current user profile |
+| GET | `/auth/me/permissions` | Yes | — | Current user's roles, global permissions, and per-project permissions |
+| POST | `/auth/logout` | Yes | — | Stateless logout acknowledgement |
+| POST | `/auth/forgot-password` | No | — | Request password reset token |
+| POST | `/auth/reset-password` | No | — | Reset password with token |
 
-Server-side filtering, sorting, and pagination parameters:
+### Navigation Menus
 
-| Query Param | Type | Notes |
-| --- | --- | --- |
-| `q` | string | Case-insensitive title keyword search |
-| `status` | string | Single status or comma-separated values (e.g. `todo,done`) |
-| `schedule_status` | string | Backend-computed schedule filter: `finished_early`, `overdue`, `on_time`, `not_specified` (comma-separated allowed) |
-| `health_status` | string | Derived task health filter: `ahead`, `on_track`, `at_risk`, `critical`, `needs_plan` (comma-separated allowed) |
-| `assignee_id` | UUID | Filter by assignee |
-| `start_from`, `start_to` | datetime/date | Accepts RFC3339 or `YYYY-MM-DD` |
-| `due_from`, `due_to` | datetime/date | Accepts RFC3339 or `YYYY-MM-DD` |
-| `sort_by` | string | `start_date`, `due_date`, `created_at`, `updated_at`, `title`, `status`, `progress`, `expected_progress_pct`, `actual_progress_pct`, `variance_pct`, `health_status` |
-| `sort_dir` | string | `asc` or `desc` (invalid value returns `400`) |
-| `page` | integer | 1-based page number, default `1` |
-| `per_page` | integer | Items per page, default `50`, max `100` |
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/menus` | Yes | `menu.view` | RBAC-filtered navigation menu list |
 
-Pagination metadata:
+See [Navigation Menus](#navigation-menus-1) for ETag caching and frontend integration details.
 
-- Response header `X-Total-Count` contains total matching rows (before `LIMIT/OFFSET`).
+### Projects
 
-Legacy compatibility:
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/projects` | Yes | `project.view` | List projects |
+| POST | `/projects` | Yes | `project.create` | Create project |
+| GET | `/projects/{id}` | Yes | `project.view` | Get project |
+| PUT | `/projects/{id}` | Yes | `project.update` | Update project |
+| DELETE | `/projects/{id}` | Yes | `project.delete` | Soft-delete project |
+| POST | `/projects/{id}/plan` | Yes | `project.update` | Set project S-curve plan |
+| DELETE | `/projects/{id}/plan` | Yes | `project.update` | Clear project S-curve plan |
+| GET | `/projects/{id}/dashboard` | Yes | `project.view` | Dashboard with metric series and aggregates |
+| GET | `/projects/{id}/critical-path` | Yes | `project.view` | Critical path computation |
+| GET | `/projects/{id}/s-curve/health` | Yes | `project.view` | S-curve health status |
+| GET | `/portfolio/s-curve/summary` | Yes | `project.view` | Portfolio-level S-curve summary |
+| GET | `/users/me/projects` | Yes | — | Accessible projects with scoped permissions |
 
-- `progress=true` and optional `task_id` are legacy query params on this endpoint.
-- Prefer using dedicated progress endpoints for progress payloads.
+### Project Members & Resource Roles
 
-### Task Description Rules
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/projects/{project_id}/members` | Yes | `project.view` | Members + access role + resource roles |
+| POST | `/projects/{project_id}/members` | Yes | `project.update` | Add/update member |
+| DELETE | `/projects/{project_id}/members/{user_id}` | Yes | `project.update` | Remove member |
+| GET | `/resource-roles` | Yes | `project.view` | Global resource role catalog |
+| POST | `/resource-roles` | Yes | `project.update` | Create resource role |
+| PUT/DELETE | `/resource-roles/{id}` | Yes | `project.update` | Update/delete resource role |
+| GET | `/projects/{project_id}/resource-roles` | Yes | `project.view` | Effective resource roles + project rate overrides |
+| PUT | `/projects/{project_id}/resource-roles/{id}/rate` | Yes | `project.update` | Upsert project rate override |
+| DELETE | `/projects/{project_id}/resource-roles/{id}/rate` | Yes | `project.update` | Remove project rate override |
 
-- `Task`, `TaskCreateRequest`, and `TaskUpdateRequest` now include `description`.
-- On create, if `description` is missing/blank, backend auto-fills: `[Quick Add] {title}`.
-- On update, blank `description` is rejected with `400`.
+### Tasks
 
-### Task Health & Progress Model
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/projects/{project_id}/tasks` | Yes | `task.view` | List tasks (filterable, sortable, paginated) |
+| POST | `/projects/{project_id}/tasks` | Yes | `task.create` | Create task |
+| GET | `/projects/{project_id}/tasks/{id}` | Yes | `task.view` | Get task |
+| PUT | `/projects/{project_id}/tasks/{id}` | Yes | `task.update` | Update task |
+| DELETE | `/projects/{project_id}/tasks/{id}` | Yes | `task.delete` | Soft-delete task |
+| PUT | `/projects/{project_id}/tasks/batch` | Yes | `task.update` | Batch update tasks |
+| DELETE | `/projects/{project_id}/tasks/batch` | Yes | `task.delete` | Batch soft-delete tasks |
+| GET | `/projects/{project_id}/tasks/{id}/activity` | Yes | `task.view` | Task change history (automatic audit trail) |
+| GET/PUT | `/projects/{project_id}/tasks/{id}/progress-components` | Yes | `task.view/update` | Weighted progress components |
+| GET | `/projects/{project_id}/assignees` | Yes | `task.view` | Distinct assignees in project |
+| GET/PUT | `/projects/{project_id}/task-health/rules` | Yes | `task.view/update` | Task health thresholds |
 
-- `Task` responses now include:
-  - stored planning fields: `progress_method`, `blocked_flag`, `blocked_reason`, `baseline_start_at`, `baseline_end_at`, `task_weight`
-  - derived fields: `execution_status`, `expected_progress_pct`, `actual_progress_pct`, `variance_pct`, `health_status`, `expected_progress_source`, `actual_progress_source`
-- `progress_method` values:
-  - `manual_percent_legacy`
-  - `weighted_components`
-- `execution_status` values:
-  - `not_started`
-  - `in_progress`
-  - `blocked`
-  - `completed`
-- `health_status` values:
-  - `ahead`
-  - `on_track`
-  - `at_risk`
-  - `critical`
-  - `needs_plan`
-- `progress` remains on the API as a compatibility mirror.
-- Direct `progress` writes are only allowed when `progress_method=manual_percent_legacy`.
-- For `weighted_components` tasks, use `GET/PUT /projects/{project_id}/tasks/{id}/progress-components`.
-- If a `weighted_components` task receives direct progress writes through task/progress endpoints, backend returns `400`.
-- If `baseline_start_at` / `baseline_end_at` are omitted, backend derives them from timeline fields when possible:
-  - start from `start_date`
-  - end from `end_date`, or `due_date` as fallback
-  - invalid or incomplete timeline still leaves `health_status=needs_plan`
+### Progress & Work Logs
 
-### Task Health Rules
-
-- Global defaults are seeded from `USECASE.md`:
-  - `critical`: variance `< -25`
-  - `at_risk`: variance `>= -25` and `< -10`
-  - `on_track`: variance `>= -10` and `< 10`
-  - `ahead`: variance `>= 10`
-- `GET /projects/{project_id}/task-health/rules` returns the effective rule set for the project.
-- `PUT /projects/{project_id}/task-health/rules` stores a project-scoped override.
-- `needs_plan` is backend-derived and cannot be configured directly.
-
-### Progress Components
-
-- `PUT /projects/{project_id}/tasks/{id}/progress-components` uses full-set replacement.
-- Each component includes:
-  - `name`
-  - `component_type`
-  - `weight`
-  - `completion_pct`
-  - optional `planned_at`
-  - optional `completed_at`
-  - optional `sort_order`
-- Backend computes `actual_progress_pct` as weighted completion:
-  - `SUM(weight * completion_pct) / SUM(weight)`
-- If a `weighted_components` task has no active components, `actual_progress_pct` is `null` and `health_status` becomes `needs_plan`.
-
-### Task Completion & Schedule Status
-
-- `Task` responses now include backend-managed `completed_at`, `completed_at_is_backfilled`, and `schedule_status`.
-- `completed_at` is set when a task is marked complete by task update or reaches `progress=100` through progress history.
-- `completed_at_is_backfilled=true` means the timestamp was reconstructed for legacy data and should not be treated as an explicit completion event.
-- Reopening a task clears `completed_at`.
-- `schedule_status` is computed by backend as one of:
-  - `finished_early`
-  - `overdue`
-  - `on_time`
-  - `not_specified`
-- If a task has no due date, `schedule_status` is `not_specified`.
-
-### Dashboard Summary Fields
-
-`GET /projects/{id}/dashboard` now also returns:
-
-- `overall_progress_pct`
-- `task_status_counts`
-- `workload_distribution`
-- `assignment_coverage_pct`
-- `due_date_coverage_pct`
-
-Summary rules:
-
-- `overall_progress_pct` is the weighted current actual-progress rollup across non-deleted tasks in the project.
-- `task_status_counts` is based on backend-computed schedule status, not raw task status strings.
-- `workload_distribution` includes active project members even when they currently have `task_count=0`.
-- `workload_distribution` currently measures `task_count`, not capacity or estimated hours.
-
-Progress metric source rules:
-
-- Planned progress prefers `project_plan.planned_progress`.
-- If `project_plan` is absent, backend falls back to weighted task `expected_progress_pct`.
-- Actual progress comes from weighted task actual-progress rollups.
-- If weighted task actuals are unavailable, backend falls back to legacy `task_progress.progress` history.
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET/POST | `/projects/{project_id}/tasks/{task_id}/progress` | Yes | `progress.view/create` | Task progress entries |
+| GET/PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/progress/{id}` | Yes | `progress.view/create` | Single progress entry |
+| GET | `/projects/{project_id}/progress` | Yes | `progress.view` | All progress in project |
+| GET | `/tasks/{task_id}/progress` | Yes | `progress.view` | Legacy: progress by task id |
+| GET/POST | `/projects/{project_id}/tasks/{task_id}/work-logs` | Yes | `task.view/update` | Manual labor/cost work logs |
+| PUT/DELETE | `/projects/{project_id}/tasks/{task_id}/work-logs/{id}` | Yes | `task.update` | Update/delete work log |
 
 ### Notifications & Realtime
 
-- Durable notification REST endpoints:
-  - `GET /notifications`
-  - `GET /notifications/unread-count`
-  - `POST /notifications/read`
-  - `POST /notifications/read-all`
-- WebSocket feed:
-  - `GET /realtime/ws`
-  - authenticate with standard `Authorization: Bearer <token>` when the client can set headers
-  - browser clients may use `?token=<jwt>` as a query fallback
-- Client commands over the WebSocket:
-  - `{"type":"subscribe","project_ids":["<project-id>"],"route":"/tasks"}`
-  - `{"type":"unsubscribe","project_ids":["<project-id>"]}`
-  - `{"type":"ping"}`
-- Event families:
-  - `notification`
-  - `presence`
-  - `data_changed`
-- Presence payload shape:
-  - websocket presence events keep the generic realtime envelope
-  - for `family="presence"`, `metadata` is now typed with:
-    - `user_id`
-    - `status` (`online|offline`)
-    - `last_seen_at`
-    - optional `route`
-    - optional `project_snapshot` array for `change_type="snapshot"`
-  - if the client sends `route` in the subscribe command, backend echoes it into presence snapshots and `online`/`updated` presence events
-  - clients may re-send `subscribe` with the same `project_ids` and a new `route` to refresh presence context without reopening the socket
-- Durable notification fields:
-  - `GET /notifications` now also returns:
-    - `project_name`
-    - `title`
-    - `message`
-    - `route`
-    - `severity`
-- Delivery model:
-  - REST remains the source of truth for CRUD reads
-  - WebSocket messages are invalidation and awareness signals only
-  - project-scoped presence, `data_changed`, and durable notification visibility require effective backend `project.view` access, not just raw membership
-  - durable notifications are automatically hidden when the user loses project visibility
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/notifications` | Yes | `project.view` | Durable notifications |
+| GET | `/notifications/unread-count` | Yes | `project.view` | Unread notification count |
+| POST | `/notifications/read` | Yes | `project.view` | Mark selected as read |
+| POST | `/notifications/read-all` | Yes | `project.view` | Mark all as read |
+| GET | `/realtime/ws` | Yes | `project.view` | WebSocket feed |
 
-### Progress vs Work Logs
+### Users & RBAC
 
-- Progress endpoints now track `% progress` and optional `note` only.
-- `actual_hours` and `actual_cost` were removed from progress request/response schemas.
-- Hours/cost economics are captured via task `work-logs` with resource-role + rate snapshots.
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/users` | Yes | `user.view` | List users |
+| POST | `/users` | Yes | `user.manage` | Create user |
+| PUT | `/users/{id}` | Yes | `user.manage` | Update user |
+| DELETE | `/users/{id}` | Yes | `user.manage` | Soft-delete user |
+| GET/POST/DELETE | `/rbac/roles` | Yes | `role.view/manage` | Role management |
+| GET/POST/DELETE | `/rbac/permissions` | Yes | `permission.view/manage` | Permission management |
+| GET/POST/DELETE | `/rbac/users/{id}/roles` | Yes | `role.manage` | Assign/revoke roles |
+| GET/POST | `/rbac/users/{id}/permissions` | Yes | `permission.manage` | Direct permission grants |
+| GET | `/rbac/users/{id}/effective-permissions` | Yes | `permission.view` | Resolved effective permissions |
+| GET | `/rbac/audit-logs` | Yes | `role.view` | RBAC audit log |
+
+### Admin
+
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| GET | `/admin/tasks/{task_id}/history` | Yes | `task.history` | Full audit trail for a task (admin/super_admin only) |
+
+### Telemetry
+
+| Method | Path | Auth | Permission | Purpose |
+|---|---|---|---|---|
+| POST | `/telemetry/events` | Yes | `telemetry.ingest` | Ingest frontend telemetry batch |
+
+---
+
+## Navigation Menus
+
+`GET /menus` returns only the navigation items the current user has permission to see. The backend filters by RBAC — the frontend renders whatever it receives, no client-side permission checks needed.
+
+### Response shape
+
+```json
+{
+  "version": 1,
+  "menus": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "route": "/",
+      "section": "main",
+      "priority": 10,
+      "surfaces": ["sidebar", "bottom-nav", "search"],
+      "icon": "LayoutDashboard",
+      "keywords": ["home", "overview", "summary"]
+    }
+  ]
+}
+```
+
+### Menu items and their gates
+
+| id | label | section | required_permission |
+|---|---|---|---|
+| `dashboard` | Dashboard | main | _(none — always visible)_ |
+| `projects` | Projects | main | `project.view` |
+| `tasks` | Tasks | main | `task.view` |
+| `settings` | Settings | settings | _(none — always visible)_ |
+| `settings-users` | Users | settings | `user.manage` |
+| `settings-roles` | Roles | settings | `role.manage` |
+| `settings-policy` | Policy | settings | `role.manage` |
+| `settings-flow` | Access Flow | settings | `user.manage` |
+
+### ETag caching
+
+The response includes `ETag` and `Cache-Control: private, max-age=300` headers. On subsequent requests send `If-None-Match: <etag>` — a `304 Not Modified` means the cached list is still valid. The ETag encodes both the menu version and the user's permission fingerprint, so it correctly invalidates when permissions change.
+
+```http
+# First request
+GET /menus
+Authorization: Bearer <token>
+→ 200 OK
+   ETag: "v1-a3f2b1c4d5e6f7a8"
+   Cache-Control: private, max-age=300
+
+# Subsequent request
+GET /menus
+Authorization: Bearer <token>
+If-None-Match: "v1-a3f2b1c4d5e6f7a8"
+→ 304 Not Modified  (no body)
+```
+
+---
+
+## RBAC
+
+### How it works
+
+1. Every protected route has a `permission_name` in the `route_permissions` table.
+2. On each request, the `dynamic_authz` middleware loads the caller's `Principal` (roles + permissions + project-scoped permissions) from DB, with a configurable in-memory cache (`AUTHZ_PRINCIPAL_CACHE_MS`).
+3. `AUTHZ_MODE=strict` (default) denies with `403` on any permission failure. Set `AUTHZ_MODE=off` locally to bypass RBAC entirely.
+
+### Self-service permissions (`GET /auth/me/permissions`)
+
+Any authenticated user can call this to discover their own roles and permissions — useful for driving UI visibility:
+
+```json
+{
+  "roles": ["viewer"],
+  "permissions": ["menu.view", "project.view", "task.view"],
+  "project_permissions": [
+    {
+      "project_id": "...",
+      "project_name": "Alpha Project",
+      "permissions": ["project.view", "task.view"]
+    }
+  ]
+}
+```
+
+### View-as (admin only)
+
+Admins (`admin` or `super_admin` role) can inspect the app from another user's or role's perspective by attaching a header to any request. The header only affects which permissions are checked — all writes are still attributed to the real admin's identity.
+
+| Header | Value | Effect |
+|---|---|---|
+| `X-View-As-User` | target user UUID | Load that user's full principal (roles + permissions + project scopes) |
+| `X-View-As-Role` | role name (e.g. `"viewer"`) | Synthetic principal with only that role's global permissions |
+
+`X-View-As-User` takes priority when both headers are present. Non-admins sending these headers are silently ignored.
+
+```http
+GET /projects
+Authorization: Bearer <admin-token>
+X-View-As-User: <target-user-uuid>
+```
+
+### Adding a new permission
+
+1. Add an entry to `permissions.json`:
+   ```json
+   { "name": "REPORT_VIEW", "value": "report.view" }
+   ```
+2. Create a migration inserting into `permissions`, assigning to roles via `role_permissions`, and adding to `route_permissions`:
+   ```sql
+   INSERT OR IGNORE INTO permissions (id, name, description, created_at, updated_at)
+   VALUES (lower(hex(randomblob(16))), 'report.view', 'View reports', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+   INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+   SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE p.name = 'report.view';
+
+   INSERT OR IGNORE INTO route_permissions (id, route_pattern, method, permission_name, created_at, updated_at)
+   VALUES ('<uuid>', '/reports', 'GET', 'report.view', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+   ```
+3. The constant `crate::authz::permissions::REPORT_VIEW` is available at next build (generated by `build.rs` from `permissions.json`).
+
+---
+
+## Task Activity Log
+
+`GET /projects/{project_id}/tasks/{id}/activity` returns the automatic change history for a task — every create, update, and delete event with actor and changed fields.
+
+This is powered by `activity_log` (indexed on `subject_id, event_name, occurred_at DESC`) which is written to automatically on every task mutation. No manual action required.
+
+```json
+[
+  {
+    "event": "task.created",
+    "actor_id": "...",
+    "occurred_at": "2026-04-16T09:00:00Z",
+    "changes": { "title": "Re-design login page" }
+  },
+  {
+    "event": "task.updated",
+    "actor_id": "...",
+    "occurred_at": "2026-04-16T10:30:00Z",
+    "changes": { "status": ["todo", "in_progress"] }
+  }
+]
+```
+
+**Work logs** (`/work-logs` endpoints) are a separate billing concept — actual hours × resource role rate = cost. Entries are created either manually (`source: "manual"`) or automatically when task progress moves forward (`source: "auto_progress"`, calculated from `duration_days × WORKING_HOURS_PER_DAY × progress_delta`). Do not confuse these with the automatic activity log.
+
+---
+
+## Task List Query
+
+`GET /projects/{project_id}/tasks` supports server-side filtering, sorting, and pagination:
+
+| Query Param | Type | Notes |
+|---|---|---|
+| `q` | string | Case-insensitive title keyword search |
+| `status` | string | Single or comma-separated (`todo,done`) |
+| `schedule_status` | string | `finished_early`, `overdue`, `on_time`, `not_specified` |
+| `health_status` | string | `ahead`, `on_track`, `at_risk`, `critical`, `needs_plan` |
+| `assignee_id` | UUID | Filter by assignee |
+| `start_from`, `start_to` | datetime/date | RFC3339 or `YYYY-MM-DD` |
+| `due_from`, `due_to` | datetime/date | RFC3339 or `YYYY-MM-DD` |
+| `sort_by` | string | `start_date`, `due_date`, `created_at`, `updated_at`, `title`, `status`, `progress`, `expected_progress_pct`, `actual_progress_pct`, `variance_pct`, `health_status` |
+| `sort_dir` | string | `asc` or `desc` |
+| `page` | integer | 1-based, default `1` |
+| `per_page` | integer | Default `50`, max `100` |
+
+Response includes `X-Total-Count` header with total matching rows before pagination.
+
+---
+
+## Task Health & Progress Model
+
+- `progress_method`: `manual_percent_legacy` | `weighted_components`
+- `execution_status`: `not_started` | `in_progress` | `blocked` | `completed`
+- `health_status`: `ahead` | `on_track` | `at_risk` | `critical` | `needs_plan`
+- `schedule_status`: `finished_early` | `overdue` | `on_time` | `not_specified`
+
+Default health thresholds (project-overridable via `PUT /projects/{id}/task-health/rules`):
+
+| Status | Variance condition |
+|---|---|
+| `critical` | `< -25` |
+| `at_risk` | `>= -25` and `< -10` |
+| `on_track` | `>= -10` and `< 10` |
+| `ahead` | `>= 10` |
+| `needs_plan` | No baseline set (derived, not configurable) |
+
+For `weighted_components` tasks use `PUT /projects/{id}/tasks/{id}/progress-components` (full-set replacement). Actual progress = `SUM(weight × completion_pct) / SUM(weight)`.
+
+If `baseline_start_at` / `baseline_end_at` are omitted, backend derives them from `start_date` / `end_date` (or `due_date` as fallback).
+
+---
+
+## Realtime & Notifications
+
+WebSocket feed at `GET /realtime/ws`. Authenticate via `Authorization: Bearer <token>` header or `?token=<jwt>` query param for browser clients.
+
+Client commands:
+
+```json
+{ "type": "subscribe",   "project_ids": ["<uuid>"], "route": "/tasks" }
+{ "type": "unsubscribe", "project_ids": ["<uuid>"] }
+{ "type": "ping" }
+```
+
+Event families: `notification` | `presence` | `data_changed`
+
+WebSocket events are invalidation signals only — REST endpoints remain the source of truth for data reads.
+
+---
 
 ## Development & Tests
 
@@ -398,70 +465,54 @@ Test safety model:
 - Temp DB files are deleted automatically after each test.
 - Your original `scurve.sqlite` is not modified by test runs.
 
-```bash
-# run all unit + integration tests
-cargo test --tests
+`scurve.sqlite` must be migration-current before running tests:
 
-# focused test
-cargo test --test api_integration
+```bash
+make migrate
 ```
 
-Docker test commands (`rust-service`):
+Run tests:
 
 ```bash
-# run all unit + integration tests
+make test                   # all integration tests
+
+# single test file (no make target — run directly)
 docker exec rust-service cargo +1.88.0 test \
   --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target \
-  --tests
-
-# run one test file
-docker exec rust-service cargo +1.88.0 test \
-  --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target \
-  --test ownership_isolation
+  --target-dir /apps/scurve-be/target --test menus
 ```
 
-One-command validation (`Makefile`):
+One-command validation:
 
 ```bash
-# full validation: smoke + fmt + tests + audit + deny
-make validate
-
-# skip runtime smoke (useful in CI or when API is not running)
-make validate-no-smoke
+make validate            # smoke + fmt + tests + audit + deny
+make validate-no-smoke   # skip smoke (useful in CI)
 ```
 
-Common overrides:
+Runtime smoke test (API must be running):
 
 ```bash
-make validate SERVICE=rust-service BASE_URL=https://localhost:8800
-make smoke CLEANUP_PROJECT=0
-```
-
-Runtime smoke test (hits auth/project/task/work-log/S-curve/dashboard paths):
-
-```bash
-# API must already be running
 ./scripts/smoke_api.sh
-
-# optional overrides
 BASE_URL=https://localhost:8800 INSECURE_TLS=1 ./scripts/smoke_api.sh
-CLEANUP_PROJECT=0 ./scripts/smoke_api.sh
 ```
 
-If `scurve.sqlite` is missing/outdated, refresh it first:
+---
 
-```bash
-docker exec rust-service cargo +1.88.0 run \
-  --manifest-path /apps/scurve-be/Cargo.toml \
-  --target-dir /apps/scurve-be/target \
-  --release --bin cli -- migrate-run
-```
+## Adding a New Route (checklist)
+
+1. Add handler in `src/routes/<resource>.rs` with `#[utoipa::path(...)]`
+2. Register in `src/app.rs` router
+3. Add route → permission mapping via migration (`route_permissions` table)
+4. Add permission to `permissions.json` (auto-generates `permissions_generated.rs` at build)
+5. Add integration test
+6. Run `make validate-no-smoke`
+
+---
 
 ## Troubleshooting
 
-- `failed to run migrations`: run `cargo run --bin cli -- migrate-status` and ensure `DATABASE_URL` points to the intended SQLite file.
-- `cargo: not found` in container: do not wrap with `sh -lc`; run Cargo directly via `docker exec rust-service cargo ...`.
-- `rustc 1.87.0 is not supported` for `time`: run with `cargo +1.88.0 ...` (or install/use Rust 1.88 toolchain in the container).
-- Swagger loads but calls wrong scheme: check whether `CERT_PATH`/`KEY_PATH` are set and restart the server.
+- **`failed to run migrations`**: run `make migrate-status` and ensure `DATABASE_URL` points to the intended SQLite file.
+- **`rustc 1.87.0 is not supported` for `time`**: run with `cargo +1.88.0 ...` (or install Rust 1.88 in the container).
+- **Swagger loads but calls wrong scheme**: check whether `CERT_PATH`/`KEY_PATH` are set and restart the server.
+- **`403 Route not configured`**: the route is not in `route_permissions`. Add a migration entry or set `AUTHZ_MODE=advisory` temporarily.
+- **`403 Permission denied`**: the user lacks the required permission. Check `GET /auth/me/permissions` to inspect their current grants.

@@ -5,6 +5,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::errors::AppError;
+use crate::models::user_preferences::UserPreferencesEmbed;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct User {
@@ -16,6 +17,8 @@ pub struct User {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub preferences: Option<UserPreferencesEmbed>,
 }
 
 impl crate::events::Loggable for User {
@@ -53,6 +56,7 @@ impl TryFrom<DbUser> for User {
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
+            preferences: None,
         })
     }
 }

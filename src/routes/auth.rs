@@ -9,6 +9,10 @@ use crate::db::row_parsers;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::user::{AuthResponse, DbUser, LoginRequest, RegisterRequest, User};
+use crate::models::user_preferences::{
+    UserPreferences, UserPreferencesUpdate, DEFAULT_CURRENCY, DEFAULT_HOUR_CYCLE, DEFAULT_LOCALE,
+    DEFAULT_TIMEZONE,
+};
 use crate::utils::{hash_password, utc_now, verify_password};
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -52,7 +56,8 @@ pub async fn register(
     .await?;
 
     let db_user = fetch_user_by_id(&state.pool, user_id).await?;
-    let user: User = db_user.try_into()?;
+    let mut user: User = db_user.try_into()?;
+    user.preferences = Some(load_preferences(&state.pool, user.id).await?.into());
     let token = state.jwt.encode(user.id)?;
 
     // Log activity with request context
@@ -117,7 +122,8 @@ pub async fn login(
     }
 
     let token = state.jwt.encode(db_user.id)?;
-    let user: User = db_user.try_into()?;
+    let mut user: User = db_user.try_into()?;
+    user.preferences = Some(load_preferences(&state.pool, user.id).await?.into());
 
     Ok(Json(AuthResponse { token, user }))
 }
@@ -131,8 +137,236 @@ pub async fn login(
 )]
 pub async fn me(State(state): State<AppState>, auth: AuthUser) -> AppResult<Json<User>> {
     let db_user = fetch_user_by_id(&state.pool, auth.user_id).await?;
-    let user: User = db_user.try_into()?;
+    let mut user: User = db_user.try_into()?;
+    user.preferences = Some(load_preferences(&state.pool, user.id).await?.into());
     Ok(Json(user))
+}
+
+// --- Preferences ---
+
+/// Get current user's display preferences
+///
+/// Always returns 200 (never 404). If the user has not saved preferences,
+/// returns system defaults (Asia/Jakarta, id-ID, 24-hour cycle).
+#[utoipa::path(
+    get,
+    path = "/auth/me/preferences",
+    tag = "Auth",
+    responses((status = 200, description = "Current user preferences", body = UserPreferences)),
+    security(("bearerAuth" = []))
+)]
+pub async fn get_preferences(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> AppResult<Json<UserPreferences>> {
+    let prefs = load_preferences(&state.pool, auth.user_id).await?;
+    Ok(Json(prefs))
+}
+
+/// Replace current user's display preferences
+#[utoipa::path(
+    put,
+    path = "/auth/me/preferences",
+    tag = "Auth",
+    request_body = UserPreferencesUpdate,
+    responses(
+        (status = 200, description = "Preferences updated", body = UserPreferences),
+        (status = 400, description = "Validation failed")
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn update_preferences(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<UserPreferencesUpdate>,
+) -> AppResult<Json<UserPreferences>> {
+    validate_timezone(&payload.timezone)?;
+    validate_locale(&payload.locale)?;
+    validate_hour_cycle(payload.hour_cycle)?;
+    let currency = validate_currency(&payload.currency)?;
+
+    let old = load_preferences(&state.pool, auth.user_id).await?;
+
+    let now = utc_now();
+    sqlx::query(
+        "INSERT INTO user_preferences (user_id, timezone, locale, hour_cycle, currency, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(user_id) DO UPDATE SET \
+           timezone = excluded.timezone, \
+           locale = excluded.locale, \
+           hour_cycle = excluded.hour_cycle, \
+           currency = excluded.currency, \
+           updated_at = excluded.updated_at",
+    )
+    .bind(auth.user_id.to_string())
+    .bind(&payload.timezone)
+    .bind(&payload.locale)
+    .bind(payload.hour_cycle)
+    .bind(&currency)
+    .bind(now)
+    .execute(&state.pool)
+    .await?;
+
+    let new_prefs = UserPreferences {
+        timezone: payload.timezone,
+        locale: payload.locale,
+        hour_cycle: payload.hour_cycle,
+        currency,
+        updated_at: now,
+    };
+
+    let mut changed: Vec<&str> = Vec::new();
+    if old.timezone != new_prefs.timezone {
+        changed.push("timezone");
+    }
+    if old.locale != new_prefs.locale {
+        changed.push("locale");
+    }
+    if old.hour_cycle != new_prefs.hour_cycle {
+        changed.push("hour_cycle");
+    }
+    if old.currency != new_prefs.currency {
+        changed.push("currency");
+    }
+
+    let ctx = crate::events::RequestContext::from_headers(&headers);
+    let event_name = "user.preferences.updated";
+    let payload_json = serde_json::json!({
+        "new": {
+            "timezone": new_prefs.timezone,
+            "locale": new_prefs.locale,
+            "hour_cycle": new_prefs.hour_cycle,
+            "currency": new_prefs.currency,
+        },
+        "old": {
+            "timezone": old.timezone,
+            "locale": old.locale,
+            "hour_cycle": old.hour_cycle,
+            "currency": old.currency,
+        },
+        "changed_fields": changed,
+        "context": ctx,
+        "severity": "important",
+    });
+    let event = crate::events::DomainEvent::new(
+        event_name,
+        Some(auth.user_id),
+        Some(auth.user_id),
+        payload_json,
+    );
+    let _ = state
+        .event_bus
+        .send(serde_json::to_value(event).unwrap_or_default());
+
+    Ok(Json(new_prefs))
+}
+
+async fn load_preferences(pool: &SqlitePool, user_id: uuid::Uuid) -> AppResult<UserPreferences> {
+    let row = sqlx::query(
+        "SELECT timezone, locale, hour_cycle, currency, updated_at FROM user_preferences WHERE user_id = ?",
+    )
+    .bind(user_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(r) => {
+            use sqlx::Row;
+            let timezone: String = r.get("timezone");
+            let locale: String = r.get("locale");
+            let hour_cycle: i64 = r.get("hour_cycle");
+            let currency: String = r.get("currency");
+            let updated_at_s: String = r.get("updated_at");
+            let updated_at = crate::utils::parse_db_datetime(&updated_at_s)?;
+            let currency = if currency.trim().is_empty() {
+                DEFAULT_CURRENCY.to_string()
+            } else {
+                currency
+            };
+            Ok(UserPreferences {
+                timezone,
+                locale,
+                hour_cycle: hour_cycle as i32,
+                currency,
+                updated_at,
+            })
+        }
+        None => Ok(UserPreferences {
+            timezone: DEFAULT_TIMEZONE.to_string(),
+            locale: DEFAULT_LOCALE.to_string(),
+            hour_cycle: DEFAULT_HOUR_CYCLE,
+            currency: DEFAULT_CURRENCY.to_string(),
+            updated_at: utc_now(),
+        }),
+    }
+}
+
+fn validate_timezone(tz: &str) -> AppResult<()> {
+    if tz.parse::<chrono_tz::Tz>().is_ok() {
+        Ok(())
+    } else {
+        Err(AppError::bad_request(format!(
+            "invalid timezone '{}' (field: timezone)",
+            tz
+        )))
+    }
+}
+
+fn validate_locale(locale: &str) -> AppResult<()> {
+    // BCP-47: language subtag (2–8 alpha) followed by optional subtags separated by '-'.
+    // Each subtag: 1–8 alphanumerics. Accepts id-ID, en-US, en, zh-Hant-TW, etc.
+    let bytes = locale.as_bytes();
+    if bytes.is_empty() || bytes.len() > 64 {
+        return Err(AppError::bad_request(format!(
+            "invalid locale '{}' (field: locale)",
+            locale
+        )));
+    }
+    let mut first = true;
+    for part in locale.split('-') {
+        if part.is_empty() || part.len() > 8 {
+            return Err(AppError::bad_request(format!(
+                "invalid locale '{}' (field: locale)",
+                locale
+            )));
+        }
+        if first {
+            if part.len() < 2 || !part.chars().all(|c| c.is_ascii_alphabetic()) {
+                return Err(AppError::bad_request(format!(
+                    "invalid locale '{}' (field: locale)",
+                    locale
+                )));
+            }
+            first = false;
+        } else if !part.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(AppError::bad_request(format!(
+                "invalid locale '{}' (field: locale)",
+                locale
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_currency(code: &str) -> AppResult<String> {
+    crate::currency::normalize(code).ok_or_else(|| {
+        AppError::bad_request(format!(
+            "invalid currency '{}' (field: currency)",
+            code
+        ))
+    })
+}
+
+fn validate_hour_cycle(h: i32) -> AppResult<()> {
+    if h == 12 || h == 24 {
+        Ok(())
+    } else {
+        Err(AppError::bad_request(format!(
+            "invalid hour_cycle {} (field: hour_cycle, allowed: 12 or 24)",
+            h
+        )))
+    }
 }
 
 // --- Me Permissions ---

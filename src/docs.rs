@@ -15,6 +15,9 @@ use crate::models;
 			models::user::AuthResponse,
 			models::user::LoginRequest,
 			models::user::RegisterRequest,
+			models::user_preferences::UserPreferences,
+			models::user_preferences::UserPreferencesEmbed,
+			models::user_preferences::UserPreferencesUpdate,
 				models::project::Project,
 				models::project::ProjectCreateRequest,
 				models::project::ProjectUpdateRequest,
@@ -119,6 +122,9 @@ use crate::models;
 				crate::models::s_curve::SCurveHealthResponse,
 				crate::models::s_curve::PortfolioSCurveProjectSummary,
 				crate::models::s_curve::PortfolioSCurveSummaryResponse,
+				crate::models::admin::TaskHistoryEntry,
+				crate::models::menu::MenuResponse,
+				crate::models::menu::MenusResponse,
 			)
 		),
 	paths(
@@ -126,6 +132,8 @@ use crate::models;
 		crate::routes::auth::login,
 		crate::routes::auth::me,
 		crate::routes::auth::me_permissions,
+		crate::routes::auth::get_preferences,
+		crate::routes::auth::update_preferences,
 		crate::routes::auth::logout,
 		crate::routes::auth::forgot_password,
 		crate::routes::auth::reset_password,
@@ -208,10 +216,16 @@ use crate::models;
 		crate::routes::users::list_users,
 		crate::routes::users::create_user,
 		crate::routes::users::update_user,
-		crate::routes::users::delete_user
+		crate::routes::users::delete_user,
+
+		crate::routes::menus::list_menus,
+
+		crate::routes::admin::list_task_history,
 	),
 	tags(
+		(name = "Admin", description = "Admin-only endpoints (require elevated permissions)"),
 		(name = "Auth", description = "Authentication endpoints"),
+		(name = "Menus", description = "Navigation menu definitions (RBAC-filtered)"),
 		(name = "Projects", description = "Project management"),
 		(name = "Tasks", description = "Task management"),
 		(name = "Progress", description = "Task progress entries"),

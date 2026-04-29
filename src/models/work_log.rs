@@ -8,6 +8,9 @@ use uuid::Uuid;
 pub enum WorkLogSource {
     Manual,
     MigratedTaskProgress,
+    /// Automatically created when a task's progress moves forward.
+    /// Calculated from duration_days × WORKING_HOURS_PER_DAY × progress_delta / 100.
+    AutoProgress,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

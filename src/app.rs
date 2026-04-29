@@ -3,7 +3,6 @@ use std::sync::Arc;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post, put};
 use axum::Router;
-use sqlx::SqlitePool;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::cors::AllowOrigin;
@@ -11,13 +10,14 @@ use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 
 use crate::authz::RoutePermissionCache;
+use crate::db::DbPool;
 use crate::errors::AppError;
 use crate::events::{self, EventBus};
 use crate::jwt::JwtConfig;
 use crate::realtime::RealtimeHub;
 use crate::routes::{
-    auth, health, notifications, progress, projects, rbac, realtime, resource_roles, tasks,
-    telemetry, users, work_logs,
+    admin, auth, health, menus, notifications, progress, projects, rbac, realtime, resource_roles,
+    tasks, telemetry, users, work_logs,
 };
 
 fn env_var_u32(name: &str, default: u32) -> u32 {
@@ -29,7 +29,7 @@ fn env_var_u32(name: &str, default: u32) -> u32 {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: SqlitePool,
+    pub pool: DbPool,
     pub jwt: Arc<JwtConfig>,
     pub event_bus: EventBus,
     pub realtime_hub: RealtimeHub,
@@ -39,7 +39,7 @@ pub struct AppState {
 impl AppState {
     #[allow(dead_code)]
     pub fn new(
-        pool: SqlitePool,
+        pool: DbPool,
         jwt: JwtConfig,
         event_bus: EventBus,
         route_cache: RoutePermissionCache,
@@ -48,7 +48,7 @@ impl AppState {
     }
 
     pub fn new_with_realtime(
-        pool: SqlitePool,
+        pool: DbPool,
         jwt: JwtConfig,
         event_bus: EventBus,
         realtime_hub: RealtimeHub,
@@ -67,7 +67,7 @@ impl AppState {
 use crate::authz;
 use axum::middleware::from_fn_with_state;
 
-pub async fn create_app(pool: SqlitePool) -> Result<Router, AppError> {
+pub async fn create_app(pool: DbPool) -> Result<Router, AppError> {
     let jwt_config = JwtConfig::from_env()?;
 
     // Initialize Event Bus and Listener
@@ -148,6 +148,10 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/login", post(auth::login))
         .route("/me", get(auth::me))
         .route("/me/permissions", get(auth::me_permissions))
+        .route(
+            "/me/preferences",
+            get(auth::get_preferences).put(auth::update_preferences),
+        )
         .route("/logout", post(auth::logout))
         .route("/forgot-password", post(auth::forgot_password))
         .route("/reset-password", post(auth::reset_password));
@@ -278,8 +282,13 @@ pub fn api_routes(state: AppState) -> Router {
         get(projects::get_portfolio_s_curve_summary),
     );
 
+    let admin_routes = Router::new()
+        .route("/tasks/:task_id/history", get(admin::list_task_history));
+
     // Protected routes (require authentication and authorization)
     let protected_routes = Router::new()
+        .nest("/admin", admin_routes)
+        .route("/menus", get(menus::list_menus))
         .nest("/users", user_routes)
         .nest("/resource-roles", resource_role_routes)
         .nest("/projects", project_routes)

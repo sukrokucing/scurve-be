@@ -56,7 +56,7 @@ async fn test_cycle_detection_returns_error() -> anyhow::Result<()> {
     let auth = AuthUser { user_id };
 
     let path = AxPath(project_id);
-    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), path).await;
+    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), None, path).await;
     assert!(res.is_err(), "expected error for cyclic dependency graph");
 
     Ok(())
@@ -122,7 +122,7 @@ async fn test_disconnected_graph_picks_longest_component() -> anyhow::Result<()>
 
     // call endpoint
     let path = AxPath(project_id);
-    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), path).await?;
+    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), None, path).await?;
     let ids = res.0.task_ids;
 
     // Expect component C->D->E to be chosen
@@ -194,7 +194,7 @@ async fn test_equal_length_paths_returns_valid_path_of_expected_length() -> anyh
     let auth = AuthUser { user_id };
 
     let path = AxPath(project_id);
-    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), path).await?;
+    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), None, path).await?;
     let ids = res.0.task_ids;
 
     // The returned path should have total duration 6 and be one of the two valid paths.
@@ -274,7 +274,7 @@ async fn test_zero_duration_tasks() -> anyhow::Result<()> {
     let auth = AuthUser { user_id };
 
     let path = AxPath(project_id);
-    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), path).await?;
+    let res = get_project_critical_path(AxState(app_state.clone()), auth.clone(), None, path).await?;
     let ids = res.0.task_ids;
 
     // All durations zero; algorithm maximizes sum of durations (0), so it may return

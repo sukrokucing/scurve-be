@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod authz;
+pub mod currency;
 #[path = "db/mod.rs"]
 pub mod db;
 pub mod docs;

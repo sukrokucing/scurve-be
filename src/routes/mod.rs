@@ -1,5 +1,7 @@
+pub mod admin;
 pub mod auth;
 pub mod health;
+pub mod menus;
 pub mod notifications;
 pub mod progress;
 pub mod projects;

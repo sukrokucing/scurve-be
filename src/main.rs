@@ -2,6 +2,7 @@
 
 mod app;
 mod authz;
+mod currency;
 mod db;
 mod docs;
 mod errors;

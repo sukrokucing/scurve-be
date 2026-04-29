@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::authz::Principal;
+use crate::authz::{resolve_data_user, Principal, ViewAsContext};
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::project::{DbProject, Project, ProjectCreateRequest, ProjectUpdateRequest};
@@ -87,7 +87,9 @@ async fn broadcast_membership_change(
 pub async fn list_projects(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<Project>>> {
+    let query_user_id = resolve_data_user(&view_as, auth.user_id);
     let id_case = uuid_sql::case_uuid("p.id");
     let user_case = uuid_sql::case_uuid("p.user_id");
     let match_owner = uuid_sql::match_uuid_clause("p.user_id");
@@ -111,10 +113,10 @@ pub async fn list_projects(
     );
 
     let rows = sqlx::query(&sql)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
         .fetch_all(&state.pool)
         .await?;
 
@@ -276,9 +278,10 @@ pub async fn create_project(
 pub async fn get_project(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Project>> {
-    let project = fetch_project(&state.pool, auth.user_id, id).await?;
+    let project = fetch_project(&state.pool, resolve_data_user(&view_as, auth.user_id), id).await?;
     let project: Project = project.try_into()?;
     Ok(Json(project))
 }
@@ -511,11 +514,12 @@ pub struct DashboardResponse {
 pub async fn get_project_dashboard(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path(id): Path<Uuid>,
     Query(query): Query<DashboardQuery>,
 ) -> AppResult<Json<DashboardResponse>> {
     // ensure project exists and belongs to user
-    let db_project = fetch_project(&state.pool, auth.user_id, id).await?;
+    let db_project = fetch_project(&state.pool, resolve_data_user(&view_as, auth.user_id), id).await?;
     let project: Project = db_project.try_into()?;
     let metric = query.metric.unwrap_or(SCurveMetric::Progress);
 
@@ -588,9 +592,10 @@ pub async fn get_project_dashboard(
 pub async fn get_task_health_rules(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path(project_id): Path<Uuid>,
 ) -> AppResult<Json<TaskHealthRuleSetResponse>> {
-    let _ = fetch_project(&state.pool, auth.user_id, project_id).await?;
+    let _ = fetch_project(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id).await?;
     let rule_set = task_metrics::load_effective_task_health_rules(&state.pool, project_id).await?;
     Ok(Json(to_task_health_rule_set_response(rule_set)))
 }
@@ -1114,10 +1119,11 @@ pub struct CriticalPathResponse {
 pub async fn get_project_critical_path(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<CriticalPathResponse>> {
     // ensure project exists and belongs to user
-    let _ = fetch_project(&state.pool, auth.user_id, id).await?;
+    let _ = fetch_project(&state.pool, resolve_data_user(&view_as, auth.user_id), id).await?;
 
     // Fetch tasks with computed duration (fallback to 0)
     let id_case = uuid_sql::case_uuid("t.id");
@@ -1399,9 +1405,10 @@ pub async fn clear_project_plan(
 pub async fn list_project_members(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path(project_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<ProjectMember>>> {
-    let _ = fetch_project(&state.pool, auth.user_id, project_id).await?;
+    let _ = fetch_project(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id).await?;
 
     let membership_case = uuid_sql::case_uuid("pm.id");
     let user_case = uuid_sql::case_uuid("pm.user_id");
@@ -1755,7 +1762,9 @@ pub async fn delete_project_member(
 pub async fn list_my_project_scopes(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<MyProjectScopeSummary>>> {
+    let query_user_id = resolve_data_user(&view_as, auth.user_id);
     let user_match = uuid_sql::match_uuid_clause("pm.user_id");
     let project_case = uuid_sql::case_uuid("pm.project_id");
     let role_case = uuid_sql::case_uuid("pm.access_role_id");
@@ -1784,8 +1793,8 @@ pub async fn list_my_project_scopes(
     );
 
     let rows = sqlx::query(&sql)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
         .fetch_all(&state.pool)
         .await?;
 
@@ -1873,10 +1882,11 @@ pub struct SCurveHealthQuery {
 pub async fn get_project_s_curve_health(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Path(id): Path<Uuid>,
     Query(query): Query<SCurveHealthQuery>,
 ) -> AppResult<Json<SCurveHealthResponse>> {
-    let _ = fetch_project(&state.pool, auth.user_id, id).await?;
+    let _ = fetch_project(&state.pool, resolve_data_user(&view_as, auth.user_id), id).await?;
     let metric = query.metric.unwrap_or(SCurveMetric::Progress);
     let response = compute_project_s_curve_health(&state.pool, id, metric).await?;
     Ok(Json(response))
@@ -1898,8 +1908,10 @@ pub struct PortfolioSummaryQuery {
 pub async fn get_portfolio_s_curve_summary(
     State(state): State<AppState>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
     Query(query): Query<PortfolioSummaryQuery>,
 ) -> AppResult<Json<PortfolioSCurveSummaryResponse>> {
+    let query_user_id = resolve_data_user(&view_as, auth.user_id);
     let metric = query.metric.unwrap_or(SCurveMetric::Progress);
     let user_match = uuid_sql::match_uuid_clause("pm.user_id");
     let project_case = uuid_sql::case_uuid("p.id");
@@ -1912,8 +1924,8 @@ pub async fn get_portfolio_s_curve_summary(
         project_case, user_match
     );
     let rows = sqlx::query(&sql)
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
         .fetch_all(&state.pool)
         .await?;
 

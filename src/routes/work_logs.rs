@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::authz::permissions;
-use crate::authz::{DefaultPolicyEvaluator, PolicyEvaluator, Principal, ResourceContext};
+use crate::authz::{resolve_data_user, DefaultPolicyEvaluator, PolicyEvaluator, Principal, ResourceContext, ViewAsContext};
 use crate::db::uuid_sql;
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
@@ -90,8 +90,9 @@ pub async fn list_work_logs(
     State(state): State<AppState>,
     Path((project_id, task_id)): Path<(Uuid, Uuid)>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<WorkLog>>> {
-    ensure_task_access(&state, auth.user_id, project_id, task_id).await?;
+    ensure_task_access(&state, resolve_data_user(&view_as, auth.user_id), project_id, task_id).await?;
 
     let rows = fetch_work_logs(&state, project_id, task_id).await?;
     Ok(Json(rows.into_iter().map(WorkLog::from).collect()))
@@ -711,6 +712,7 @@ fn parse_work_log_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<StoredWorkLog>
     let source = match source.as_str() {
         "manual" => WorkLogSource::Manual,
         "migrated_task_progress" => WorkLogSource::MigratedTaskProgress,
+        "auto_progress" => WorkLogSource::AutoProgress,
         other => {
             return Err(AppError::internal(format!(
                 "invalid work_log source: {}",
@@ -747,4 +749,203 @@ fn parse_work_log_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<StoredWorkLog>
         updated_at: parse_db_datetime(&updated_at)?,
         deleted_at: deleted_at.map(|v| parse_db_datetime(&v)).transpose()?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Auto-progress cost logging
+// ---------------------------------------------------------------------------
+
+/// Automatically create `auto_progress` work log entries when a task's progress
+/// moves forward and the task has enough data to calculate a cost estimate.
+///
+/// Silently skips (returns `Ok(())`) when:
+/// - `progress_delta <= 0`  (backwards or no change — cost never goes back)
+/// - `duration_days` is `None`  (no timeline set)
+/// - `assignee_id` is `None`  (unassigned task)
+/// - The assignee has no active project membership
+/// - The assignee has no resource roles assigned
+///
+/// Hours per day defaults to `WORKING_HOURS_PER_DAY` env var, falling back to `8`.
+/// When the assignee holds multiple resource roles the hours are split equally
+/// and one work log entry is created per role.
+pub async fn auto_log_progress_cost(
+    pool: &crate::db::DbPool,
+    project_id: Uuid,
+    task_id: Uuid,
+    assignee_id: Option<Uuid>,
+    old_progress: i32,
+    new_progress: i32,
+    duration_days: Option<i32>,
+    actor_id: Uuid,
+    now: chrono::DateTime<chrono::Utc>,
+) -> AppResult<()> {
+    let progress_delta = new_progress - old_progress;
+    if progress_delta <= 0 {
+        return Ok(());
+    }
+    let Some(days) = duration_days else {
+        return Ok(());
+    };
+    let Some(assignee) = assignee_id else {
+        return Ok(());
+    };
+
+    let hours_per_day: f64 = std::env::var("WORKING_HOURS_PER_DAY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&h: &f64| h > 0.0)
+        .unwrap_or(8.0);
+
+    let hours_for_task = days as f64 * hours_per_day;
+    let hours_to_log = (progress_delta as f64 / 100.0) * hours_for_task;
+    if hours_to_log <= 0.0 {
+        return Ok(());
+    }
+
+    // Find active project membership for the assignee (silent skip if not a member)
+    let match_project = uuid_sql::match_uuid_clause("project_id");
+    let match_user = uuid_sql::match_uuid_clause("user_id");
+    let id_case = uuid_sql::case_uuid("id");
+    let membership_sql = format!(
+        "SELECT {} FROM project_members WHERE {} AND {} AND deleted_at IS NULL LIMIT 1",
+        id_case, match_project, match_user
+    );
+    let membership_str: Option<String> = sqlx::query_scalar(&membership_sql)
+        .bind(project_id.to_string())
+        .bind(project_id.to_string())
+        .bind(assignee.to_string())
+        .bind(assignee.to_string())
+        .fetch_optional(pool)
+        .await?;
+    let Some(membership_str) = membership_str else {
+        return Ok(());
+    };
+    let membership_id = Uuid::parse_str(&membership_str)
+        .map_err(|e| AppError::internal(format!("invalid membership id: {}", e)))?;
+
+    // Fetch all active resource roles for this membership, ordered by name for determinism
+    let match_membership = uuid_sql::match_uuid_clause("pmrr.membership_id");
+    let role_id_case = uuid_sql::case_uuid("rr.id");
+    let roles_sql = format!(
+        "SELECT {}, rr.name
+         FROM project_member_resource_roles pmrr
+         JOIN resource_roles rr ON rr.id = pmrr.resource_role_id
+         WHERE {} AND pmrr.deleted_at IS NULL AND rr.deleted_at IS NULL
+         ORDER BY rr.name ASC",
+        role_id_case, match_membership
+    );
+    let role_rows = sqlx::query(&roles_sql)
+        .bind(membership_id.to_string())
+        .bind(membership_id.to_string())
+        .fetch_all(pool)
+        .await?;
+
+    if role_rows.is_empty() {
+        return Ok(());
+    }
+
+    let hours_per_role = round2(hours_to_log / role_rows.len() as f64);
+    let work_date = now.format("%Y-%m-%d").to_string();
+    let note = format!("Auto: {}% → {}% progress", old_progress, new_progress);
+
+    for row in &role_rows {
+        let role_id_str: String = row.try_get("id")?;
+        let role_id = Uuid::parse_str(&role_id_str)
+            .map_err(|e| AppError::internal(format!("invalid resource role id: {}", e)))?;
+
+        // Resolve hourly rate: project override → resource role default
+        let (hourly_rate, currency) = {
+            let match_proj = uuid_sql::match_uuid_clause("prr.project_id");
+            let match_role = uuid_sql::match_uuid_clause("prr.resource_role_id");
+            let rate_sql = format!(
+                "SELECT prr.hourly_rate, prr.currency
+                 FROM project_resource_role_rates prr
+                 WHERE {} AND {} AND prr.deleted_at IS NULL
+                 LIMIT 1",
+                match_proj, match_role
+            );
+            if let Some(rate_row) = sqlx::query(&rate_sql)
+                .bind(project_id.to_string())
+                .bind(project_id.to_string())
+                .bind(role_id.to_string())
+                .bind(role_id.to_string())
+                .fetch_optional(pool)
+                .await?
+            {
+                let rate: f64 = rate_row.try_get("hourly_rate")?;
+                let cur: String = rate_row.try_get("currency")?;
+                (rate, cur)
+            } else {
+                let match_role_id = uuid_sql::match_uuid_clause("id");
+                let default_sql = format!(
+                    "SELECT default_hourly_rate, currency FROM resource_roles
+                     WHERE {} AND deleted_at IS NULL LIMIT 1",
+                    match_role_id
+                );
+                let default_row = sqlx::query(&default_sql)
+                    .bind(role_id.to_string())
+                    .bind(role_id.to_string())
+                    .fetch_optional(pool)
+                    .await?
+                    .ok_or_else(|| AppError::internal("resource role vanished during auto-log"))?;
+                let rate: f64 = default_row.try_get("default_hourly_rate")?;
+                let cur: String = default_row.try_get("currency")?;
+                (rate, cur)
+            }
+        };
+
+        let cost_amount = round2(hours_per_role * hourly_rate);
+
+        // Use the subselect pattern to store the canonical DB-format UUID for FK columns
+        let project_match = uuid_sql::match_uuid_clause("id");
+        let task_match = uuid_sql::match_uuid_clause("id");
+        let user_match = uuid_sql::match_uuid_clause("id");
+        let role_match = uuid_sql::match_uuid_clause("id");
+        let actor_match = uuid_sql::match_uuid_clause("id");
+        let insert_sql = format!(
+            "INSERT INTO work_logs (
+                id, project_id, task_id, user_id, resource_role_id,
+                hours, hourly_rate_snapshot, currency_snapshot, cost_amount,
+                work_date, note, source, created_at, created_by, updated_at, updated_by
+             ) VALUES (
+                ?,
+                (SELECT id FROM projects WHERE {} AND deleted_at IS NULL),
+                (SELECT id FROM tasks   WHERE {} AND deleted_at IS NULL),
+                (SELECT id FROM users   WHERE {} AND deleted_at IS NULL),
+                (SELECT id FROM resource_roles WHERE {} AND deleted_at IS NULL),
+                ?, ?, ?, ?, ?, ?, 'auto_progress', ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL),
+                ?,
+                (SELECT id FROM users WHERE {} AND deleted_at IS NULL)
+             )",
+            project_match, task_match, user_match, role_match, actor_match, actor_match
+        );
+
+        sqlx::query(&insert_sql)
+            .bind(Uuid::new_v4().to_string())
+            .bind(project_id.to_string())
+            .bind(project_id.to_string())
+            .bind(task_id.to_string())
+            .bind(task_id.to_string())
+            .bind(assignee.to_string())
+            .bind(assignee.to_string())
+            .bind(role_id.to_string())
+            .bind(role_id.to_string())
+            .bind(hours_per_role)
+            .bind(hourly_rate)
+            .bind(&currency)
+            .bind(cost_amount)
+            .bind(&work_date)
+            .bind(&note)
+            .bind(now)
+            .bind(actor_id.to_string())
+            .bind(actor_id.to_string())
+            .bind(now)
+            .bind(actor_id.to_string())
+            .bind(actor_id.to_string())
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
 }

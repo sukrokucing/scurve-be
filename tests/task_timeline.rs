@@ -255,6 +255,7 @@ async fn create_update_task_with_timeline() -> anyhow::Result<()> {
         path,
         axum::extract::Query(query),
         auth,
+        None,
     )
     .await?;
     let tasks = res.1 .0;

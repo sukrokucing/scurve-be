@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::authz::{resolve_data_user, ViewAsContext};
 use crate::errors::{AppError, AppResult};
 use crate::jwt::AuthUser;
 use crate::models::progress::{Progress, ProgressCreateRequest, ProgressUpdateRequest};
@@ -26,8 +27,9 @@ pub async fn list_progress(
     State(state): State<AppState>,
     Path((project_id, task_id)): Path<(Uuid, Uuid)>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<Progress>>> {
-    ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
+    ensure_task_belongs_to_user(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id, task_id).await?;
 
     let id_case = uuid_sql::case_uuid("id");
     let project_case = uuid_sql::case_uuid("project_id");
@@ -69,8 +71,9 @@ pub async fn list_progress_by_task(
     State(state): State<AppState>,
     Path(task_id): Path<Uuid>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<Progress>>> {
-    ensure_task_belongs_to_user_by_task_id(&state.pool, auth.user_id, task_id).await?;
+    ensure_task_belongs_to_user_by_task_id(&state.pool, resolve_data_user(&view_as, auth.user_id), task_id).await?;
 
     let id_case = uuid_sql::case_uuid("id");
     let project_case = uuid_sql::case_uuid("project_id");
@@ -123,7 +126,9 @@ pub async fn list_project_progress(
     Path(project_id): Path<Uuid>,
     Query(filter): Query<ProgressFilter>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Vec<Progress>>> {
+    let query_user_id = resolve_data_user(&view_as, auth.user_id);
     // verify project belongs to user
     let match_proj = uuid_sql::match_uuid_clause("p.id");
     let match_owner = uuid_sql::match_uuid_clause("p.user_id");
@@ -147,10 +152,10 @@ pub async fn list_project_progress(
     let owner_s = sqlx::query_scalar::<_, String>(&sql_owner)
         .bind(project_id.to_string())
         .bind(project_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(auth.user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
+        .bind(query_user_id.to_string())
         .fetch_optional(&state.pool)
         .await?;
 
@@ -488,8 +493,9 @@ pub async fn get_progress(
     State(state): State<AppState>,
     Path((project_id, task_id, id)): Path<(Uuid, Uuid, Uuid)>,
     auth: AuthUser,
+    view_as: Option<axum::Extension<ViewAsContext>>,
 ) -> AppResult<Json<Progress>> {
-    ensure_task_belongs_to_user(&state.pool, auth.user_id, project_id, task_id).await?;
+    ensure_task_belongs_to_user(&state.pool, resolve_data_user(&view_as, auth.user_id), project_id, task_id).await?;
 
     let id_case = uuid_sql::case_uuid("id");
     let project_case = uuid_sql::case_uuid("project_id");

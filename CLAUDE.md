@@ -163,3 +163,13 @@ All mutable entities use `deleted_at IS NULL` filter. Always include `AND delete
 - No `X-Request-ID` correlation header — add `MakeSpan` to `TraceLayer`
 - `list_tasks` still fetches all rows before applying `health_status`/`schedule_status` filters (these are computed, not stored) — future: materialise as stored columns
 - `projects.rs` is ~2900 lines — future: split into `dashboard.rs`, `s_curve.rs`, `critical_path.rs` sub-modules
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)

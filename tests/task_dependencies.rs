@@ -71,7 +71,7 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
 
     // 2. List Dependencies
     let path = AxPath(project_id);
-    let res = list_dependencies(AxState(app_state.clone()), path, auth.clone()).await?;
+    let res = list_dependencies(AxState(app_state.clone()), path, auth.clone(), None).await?;
     let deps = res.0;
     // Debug: check raw table count
     let total: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM task_dependencies")
@@ -158,7 +158,7 @@ async fn test_task_dependencies() -> anyhow::Result<()> {
 
     // 6. Verify Deletion
     let path = AxPath(project_id);
-    let res = list_dependencies(AxState(app_state.clone()), path, auth.clone()).await?;
+    let res = list_dependencies(AxState(app_state.clone()), path, auth.clone(), None).await?;
     // One dependency (T2->T3) remains after deleting the original T1->T2
     assert_eq!(res.0.len(), 1);
     assert_eq!(res.0[0].source_task_id, task2_id);

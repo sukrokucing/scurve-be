@@ -1,4 +1,6 @@
+pub mod admin;
 pub mod audit_log;
+pub mod menu;
 pub mod dependency;
 pub mod notification;
 pub mod progress;
@@ -14,4 +16,5 @@ pub mod task_health;
 pub mod task_progress_component;
 pub mod telemetry;
 pub mod user;
+pub mod user_preferences;
 pub mod work_log;

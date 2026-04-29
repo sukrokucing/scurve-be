@@ -14,6 +14,7 @@ pub mod route_cache;
 
 // Re-export common items
 pub use evaluator::{DefaultPolicyEvaluator, PolicyEvaluator};
+pub use layer::{resolve_data_user, ViewAsContext};
 pub use principal::{Principal, ResourceContext};
 pub use route_cache::RoutePermissionCache;
 
